@@ -59,7 +59,7 @@ export const inboundHandlerService = {
 
         if (!contact || !lead) {
           await connection.addFlags(item.attributes.uid, ['\\Seen']);
-          await Log.create({ execution_id: exec_id, workflow: wf, entity_id: from, action: 'Unmatched', result: 'Unmatched', severity: 'Medium', human_approval: true });
+          await Log.create({ execution_id: exec_id, workflow: wf, entity_id: from || 'unknown-email', action: 'Unmatched', result: 'Unmatched', severity: 'Medium', human_approval: true });
           continue;
         }
 
