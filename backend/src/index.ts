@@ -69,6 +69,10 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Backend is running' });
 });
 
+app.get('/api/vynora/health', (req, res) => {
+  res.json({ status: 'ok', message: 'Backend is running' });
+});
+
 // Schedule Cron Jobs
 cron.schedule('0 9 * * *', async () => {
   console.log('Running daily Outbound Lead Machine via cron');
