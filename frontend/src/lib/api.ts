@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'http://localhost:3000/api/vynora', // URL to our Node.js backend
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/vynora', // Dynamic backend URL for production
   headers: {
     'Content-Type': 'application/json'
   }
