@@ -160,7 +160,7 @@ Evidence/Context: ${evidence}
 Make the email feel specific and human. Return JSON {subject, body}.`;
 
         const aiResult = await aiGatewayService.processAiRequest({ prompt, system_prompt, temperature: 0.7, max_tokens: 350 });
-        await delay(1500); // Prevent AI rate limit
+        await delay(4500); // 4.5 seconds delay to perfectly respect Gemini's strict 15 RPM free-tier limit
         
         if (aiResult.success) {
           let subject = ''; let body = '';

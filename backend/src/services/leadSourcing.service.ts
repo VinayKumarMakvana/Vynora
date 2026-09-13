@@ -66,8 +66,8 @@ export class LeadSourcingService {
     const rotIdx = Math.floor(Date.now() / (4 * 3600 * 1000)) % areas.length;
     const area = areas[rotIdx];
 
-    // RESEARCH TARGET = 800 RAW BUSINESSES (to guarantee we find 200 with valid MX emails)
-    const cap = 800; 
+    // RESEARCH TARGET = 300 RAW BUSINESSES (Prevents 504 Timeouts on Overpass Public Servers)
+    const cap = 300; 
 
     const defaultGroups = 'amenity=dentist;amenity=clinic;amenity=doctors|office=it;office=telecommunication;office=company|office=lawyer;office=estate_agent;office=accountant;office=financial|industrial=factory;industrial=manufacturing;craft=builder|healthcare=hospital;tourism=hotel;leisure=resort|office=advertising_agency;office=consulting;office=architect|shop=jewelry;shop=beauty;shop=clothes;amenity=restaurant';
     const filterGroups = String(cfg.sourcing_osm_filters || defaultGroups).split('|').map(s => s.trim()).filter(Boolean);
@@ -89,8 +89,8 @@ export class LeadSourcingService {
       clauses.push(`  nwr${tag}["email"](area.searchArea);`);
     }
 
-    // Increased timeout and count
-    const ql = `[out:json][timeout:90];\narea["name"="${area}"]->.searchArea;\n(\n${clauses.join('\n')}\n);\nout tags center ${cap * 3};`;
+    // Optimized timeout to prevent 504 hanging
+    const ql = `[out:json][timeout:40];\narea["name"="${area}"]->.searchArea;\n(\n${clauses.join('\n')}\n);\nout tags center ${cap * 3};`;
 
     let elements = [];
     const endpoints = [
