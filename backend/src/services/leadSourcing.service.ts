@@ -90,7 +90,14 @@ export class LeadSourcingService {
 
     let elements = [];
     try {
-      const res = await axios.post('https://overpass-api.de/api/interpreter', ql, { headers: { 'Content-Type': 'text/plain' }, timeout: 100000 });
+      const payload = 'data=' + encodeURIComponent(ql);
+      const res = await axios.post('https://overpass-api.de/api/interpreter', payload, { 
+        headers: { 
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'VynoraAIAgency/1.0 (vinaytailor8432@gmail.com)'
+        }, 
+        timeout: 100000 
+      });
       if (res.data && Array.isArray(res.data.elements)) elements = res.data.elements;
     } catch (e: any) {
       await this.logEvent(execution_id, 'none', `Overpass API failed: ${e.message}`, 'Failed', 'High');
