@@ -88,6 +88,29 @@ export const inboundHandlerService = {
           await Lead.updateOne({ lead_id: lead.lead_id }, { qualification_status: p.category, stage: 'Engaged', status: 'active', opportunity_id: oppId, notes: `Reply: ${p.category} | ${p.summary}`, last_contact_date: new Date() });
           await Opportunity.findOneAndUpdate({ opportunity_id: oppId }, { lead_id: lead.lead_id, service: p.recommended_service, stage: p.category, bdm: lead.bdm_owner, discovery_date: new Date() }, { upsert: true });
           axios.post('https://vynoravinay.app.n8n.cloud/webhook/vynora/proposal-intake', { opportunity_id: oppId, lead_id: lead.lead_id, email: from, summary: p.summary }).catch(() => {});
+          
+          // AI AUTO-DRAFTING (Second AI Call)
+          const draftSys = 'You are a senior sales closer for VYNORA. Write a polite, professional, and highly concise reply addressing the prospect\'s exact email. Suggest a brief 10-minute introductory call. End with a simple signature. Do not use placeholders. Return ONLY JSON: { "subject": "Re: ...", "body": "..." }';
+          const draftAi = await aiGatewayService.processAiRequest({ prompt: `Prospect: ${contact.name}\nReceived Email: ${body}\nContext: ${p.summary}`, system_prompt: draftSys, temperature: 0.5, max_tokens: 300 });
+          if (draftAi.success) {
+            try {
+              const parsed = JSON.parse(draftAi.text.replace(/^\s*```json\s*/i,'').replace(/```\s*$/,'').trim());
+              await Message.create({ 
+                message_id: `MSG-DRAFT-${Date.now()}`, 
+                conversation_id: convId, 
+                lead_id: lead.lead_id, 
+                contact_id: contact.contact_id, 
+                opportunity_id: oppId, 
+                channel: 'email', 
+                direction: 'outbound', 
+                subject: parsed.subject || `Re: ${subject}`, 
+                body: parsed.body || draftAi.text, 
+                purpose: 'ai_draft_reply', 
+                status: 'draft' 
+              });
+              await Log.create({ execution_id: exec_id, workflow: wf, entity_id: lead.lead_id, action: `AI Auto-Drafted reply for ${contact.name}`, result: 'Drafted', severity: 'Low' } as any);
+            } catch(e) { console.error('Failed to parse AI draft', e); }
+          }
         } 
         else if (bucket === 'negative') {
           await Lead.updateOne({ lead_id: lead.lead_id }, { qualification_status: p.category, stage: 'Closed Lost', status: 'closed', notes: `Reply: ${p.category} | ${p.summary}`, last_contact_date: new Date() });

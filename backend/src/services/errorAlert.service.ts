@@ -1,6 +1,30 @@
 import { Log } from '../models/Log';
+import nodemailer from 'nodemailer';
 
 export class ErrorAlertService {
+  private async sendAlertEmail(subject: string, text: string) {
+    const reportEmail = process.env.REPORT_EMAIL;
+    const gmailUser = process.env.GMAIL_USER;
+    const gmailPass = process.env.GMAIL_PASS;
+
+    if (!reportEmail || !gmailUser || !gmailPass) {
+      console.warn('Alert Email Skipped: REPORT_EMAIL, GMAIL_USER, or GMAIL_PASS missing from environment variables.');
+      return false;
+    }
+
+    try {
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user: gmailUser, pass: gmailPass }
+      });
+      await transporter.sendMail({ from: gmailUser, to: reportEmail, subject, text });
+      return true;
+    } catch (e) {
+      console.error('Failed to send error alert email:', e);
+      return false;
+    }
+  }
+
   async logWorkflowError(body: any) {
     const s = (v: any) => (v === undefined || v === null) ? '' : String(v).trim();
     
@@ -34,9 +58,15 @@ export class ErrorAlertService {
       log_time: when
     } as any);
 
+    // SEND IMMEDIATE ALERT EMAIL
+    const subject = `[VYNORA EMERGENCY ALERT] Workflow Error: ${workflow_name}`;
+    const text = `VYNORA SYSTEM ALERT\n\nAn error occurred in a background workflow.\n\nTime: ${when.toISOString()}\nWorkflow: ${workflow_name}\nExecution ID: ${execution_id}\nFailing Node: ${failing_node}\n\nError Message:\n${error_message}\n\nPlease check the Render or Vercel logs immediately to prevent pipeline blockages.`;
+    
+    await this.sendAlertEmail(subject, text);
+
     return {
       status: 'success',
-      message: 'Error logged successfully',
+      message: 'Error logged and alert sent successfully',
       log_id: newLog._id
     };
   }
