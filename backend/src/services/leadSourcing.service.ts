@@ -6,7 +6,11 @@ import { Research } from '../models/Research';
 import { LeadScore } from '../models/LeadScore';
 import { Log } from '../models/Log';
 import axios from 'axios';
+import https from 'https';
 import dns from 'dns/promises';
+
+// Force IPv4 to avoid ENETUNREACH on Render (which doesn't support IPv6 outbound)
+const ipv4Agent = new https.Agent({ family: 4 });
 import { aiGatewayService } from './aiGateway.service';
 
 export class LeadSourcingService {
@@ -106,7 +110,8 @@ export class LeadSourcingService {
             'Content-Type': 'application/x-www-form-urlencoded',
             'User-Agent': 'VynoraAIAgency/1.0 (vinaytailor8432@gmail.com)'
           }, 
-          timeout: 45000 
+          timeout: 45000,
+          httpsAgent: ipv4Agent  // Force IPv4 — fixes ENETUNREACH on Render
         });
         if (res.data && Array.isArray(res.data.elements)) {
           elements = res.data.elements;
