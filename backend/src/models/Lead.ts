@@ -13,6 +13,14 @@ export interface ILead extends Document {
   last_contact_date?: Date;
   next_followup_date?: Date;
   notes?: string;
+  // Sourcing fields
+  raw_name?: string;
+  company?: string;
+  domain?: string;
+  category?: string;
+  dedupe_key?: string;
+  lead_source?: string;
+  source?: string;
 }
 
 const leadSchema = new Schema({
@@ -27,7 +35,14 @@ const leadSchema = new Schema({
   bdm_owner: { type: String },
   last_contact_date: { type: Date },
   next_followup_date: { type: Date },
-  notes: { type: String }
+  notes: { type: String },
+  raw_name: { type: String },
+  company: { type: String },
+  domain: { type: String },
+  category: { type: String },
+  dedupe_key: { type: String },
+  lead_source: { type: String },
+  source: { type: String }
 }, { timestamps: true });
 
 export const Lead = mongoose.model<ILead>('Lead', leadSchema);

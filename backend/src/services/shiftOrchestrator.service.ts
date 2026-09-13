@@ -61,6 +61,7 @@ export const shiftOrchestratorService = {
             company_id: lead.company_id,
             likely_pain_point: pain_point,
             relevant_service: relevant_service,
+            signals: `priority:${priority}`,
             status: 'completed'
           },
           { upsert: true }
