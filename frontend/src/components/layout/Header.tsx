@@ -42,19 +42,27 @@ function severityBg(severity: string): string {
   return 'border-l-2 border-indigo-500/30';
 }
 
-// Countdown to next cron cycle (runs every 30 minutes)
+// Countdown to next 8-hour shift cycle (00:00, 08:00, 16:00 UTC)
 function useNextCycleCountdown() {
-  const [countdown, setCountdown] = useState('--:--');
+  const [countdown, setCountdown] = useState('--:--:--');
   useEffect(() => {
     const tick = () => {
       const now = new Date();
-      const mins = now.getMinutes();
-      const secs = now.getSeconds();
-      const nextMark = mins < 30 ? 30 : 60;
-      const remaining = (nextMark - mins) * 60 - secs;
-      const m = Math.floor(remaining / 60).toString().padStart(2, '0');
-      const s = (remaining % 60).toString().padStart(2, '0');
-      setCountdown(`${m}:${s}`);
+      const hours = now.getUTCHours();
+      let nextHour = 24;
+      if (hours < 8) nextHour = 8;
+      else if (hours < 16) nextHour = 16;
+      else nextHour = 24;
+      
+      const nextDate = new Date(now);
+      nextDate.setUTCHours(nextHour, 0, 0, 0);
+      
+      const diffMs = nextDate.getTime() - now.getTime();
+      const h = Math.floor(diffMs / (1000 * 60 * 60)).toString().padStart(2, '0');
+      const m = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60)).toString().padStart(2, '0');
+      const s = Math.floor((diffMs % (1000 * 60)) / 1000).toString().padStart(2, '0');
+      
+      setCountdown(`${h}:${m}:${s}`);
     };
     tick();
     const interval = setInterval(tick, 1000);
@@ -131,12 +139,12 @@ export function Header() {
       
       <div className="flex items-center gap-6">
         {/* Live Countdown */}
-        <div className="flex items-center gap-2 text-sm font-medium mr-4">
-          <span className="text-gray-400">Next Cycle:</span>
-          <span className="text-indigo-400 font-mono tracking-widest bg-indigo-950/50 px-2 py-1 rounded border border-indigo-900/50">
-            {countdown}
-          </span>
-        </div>
+          <div className="flex items-center gap-2 mr-4">
+            <span className="text-gray-400 text-sm font-medium">Next Shift:</span>
+            <div className="bg-indigo-950/50 text-indigo-400 px-3 py-1 rounded border border-indigo-900/50 font-mono text-sm tracking-wider">
+              {countdown}
+            </div>
+          </div>
         
         {/* Notification Bell */}
         <div className="relative" ref={dropdownRef}>

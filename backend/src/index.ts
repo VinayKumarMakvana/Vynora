@@ -73,12 +73,7 @@ app.get('/api/vynora/health', (req, res) => {
   res.json({ status: 'ok', message: 'Backend is running' });
 });
 
-// Schedule Cron Jobs
-cron.schedule('0 9 * * *', async () => {
-  console.log('Running daily Outbound Lead Machine via cron');
-  await outboundMachineService.runMachine('cron');
-});
-
+// Outbound logic is now handled in the Shift Orchestrator
 cron.schedule('* * * * *', async () => {
   await inboundHandlerService.pollUnreadEmails();
 });
@@ -104,34 +99,15 @@ cron.schedule('0 * * * *', async () => {
   await followupEngineService.runFollowups();
 });
 
-// Run Analytics Revenue Control daily at 08:00
-cron.schedule('0 8 * * *', async () => {
-  console.log('Running scheduled daily Analytics Revenue Control (W14)...');
-  try {
-    await analyticsEngineService.runAnalytics();
-  } catch (err) {
-    console.error('Error in scheduled Analytics Revenue Control:', err);
-  }
-});
+// Unified 8-Hour Shift Orchestrator
+import { shiftOrchestratorService } from './services/shiftOrchestrator.service';
 
-// Run Master Control Loop every 30 minutes
-cron.schedule('*/30 * * * *', async () => {
-  console.log('Running scheduled Master Control Loop (W15)...');
-  try {
-    // Run cycle in automatic mode
-    await controlLoopService.runCycle(false);
-  } catch (err) {
-    console.error('Error in scheduled Master Control Loop:', err);
-  }
-});
-
-// Run Shift Report every 8 hours
 cron.schedule('0 */8 * * *', async () => {
-  console.log('Running scheduled Shift Report (W16)...');
+  console.log('Starting Unified 8-Hour AI Shift...');
   try {
-    await shiftReportService.runReport();
+    await shiftOrchestratorService.runShift();
   } catch (err) {
-    console.error('Error in scheduled Shift Report:', err);
+    console.error('Error in Shift Orchestrator:', err);
   }
 });
 

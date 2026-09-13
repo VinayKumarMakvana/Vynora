@@ -33,8 +33,8 @@ export const outboundMachineService = {
       } catch (e) {}
       if (!waitDays.length) waitDays = [3, 4, 5];
 
-      const shift_first_touch_cap = num('shift_first_touch_cap', 25);
-      const day_first_touch_cap = num('day_first_touch_cap', 75);
+      const shift_first_touch_cap = num('shift_first_touch_cap', 50); // Max 50 per shift
+      const day_first_touch_cap = num('day_first_touch_cap', 150);
 
       const SHIFT_HOURS = 8;
       const now = new Date();
@@ -66,7 +66,7 @@ export const outboundMachineService = {
           execution_id, workflow, entity_id: 'DAILY-CAP',
           action: `Daily/Shift outreach cap reached (${day_first_touch_sent}/${day_first_touch_cap} or ${shift_first_touch_sent}/${shift_first_touch_cap})`,
           result: 'Skipped', severity: 'Low', human_approval: false
-        });
+        } as any);
         console.log('Budget cap reached. Exiting.');
         return { success: true, message: 'Budget cap reached' };
       }
@@ -97,6 +97,16 @@ export const outboundMachineService = {
       // Pick up to remaining budget
       const targetLeads = sortedLeads.slice(0, remaining_budget);
       
+      if (targetLeads.length < 25) {
+        console.log(`Holding outreach: Only ${targetLeads.length} leads eligible. Minimum 25 required per shift.`);
+        await Log.create({
+          execution_id, workflow, entity_id: 'MIN-CAP',
+          action: `Outreach held: Found only ${targetLeads.length} eligible leads, minimum required is 25 per shift.`,
+          result: 'Skipped', severity: 'Info', human_approval: false
+        } as any);
+        return { success: true, message: 'Minimum 25 leads not met' };
+      }
+
       // 3. Process Selected Leads
       for (const lead of targetLeads) {
         const company = await Company.findOne({ company_id: lead.company_id });
