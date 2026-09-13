@@ -30,6 +30,7 @@ import { followupEngineService } from './services/followupEngine.service';
 import { analyticsEngineService } from './services/analyticsEngine.service';
 import { controlLoopService } from './services/controlLoop.service';
 import { shiftReportService } from './services/shiftReport.service';
+import { shiftOrchestratorService } from './services/shiftOrchestrator.service';
 
 // Load environment variables
 dotenv.config();
@@ -100,7 +101,6 @@ cron.schedule('0 * * * *', async () => {
 });
 
 // Unified 8-Hour Shift Orchestrator
-import { shiftOrchestratorService } from './services/shiftOrchestrator.service';
 
 cron.schedule('0 */8 * * *', async () => {
   console.log('Starting Unified 8-Hour AI Shift...');

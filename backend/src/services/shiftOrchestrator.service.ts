@@ -52,15 +52,19 @@ export const shiftOrchestratorService = {
           } catch(e) {}
         }
 
-        // Save Research
-        await Research.create({
-          research_id: `RES-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          lead_id: lead.lead_id,
-          company_id: lead.company_id,
-          likely_pain_point: pain_point,
-          relevant_service: relevant_service,
-          status: 'completed'
-        });
+        // Save Research (upsert to avoid duplicate key crash if lead is re-processed)
+        await Research.findOneAndUpdate(
+          { lead_id: lead.lead_id },
+          {
+            research_id: `RES-${lead.lead_id}`,
+            lead_id: lead.lead_id,
+            company_id: lead.company_id,
+            likely_pain_point: pain_point,
+            relevant_service: relevant_service,
+            status: 'completed'
+          },
+          { upsert: true }
+        );
 
         // Verify and Mark Eligible
         lead.outreach_eligible = true;

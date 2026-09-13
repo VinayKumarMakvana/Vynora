@@ -51,9 +51,9 @@ export class ErrorDigestService {
         ? `VYNORA Daily Error Digest — ${today} — All clear (0)`
         : `VYNORA Daily Error Digest — ${today} — ${count} High-severity error(s)`;
 
-      const alertEmail = process.env.ALERT_EMAIL;
+      const alertEmail = process.env.REPORT_EMAIL;
       if (!alertEmail) {
-        throw new Error('ALERT_EMAIL is not defined in .env');
+        throw new Error('REPORT_EMAIL is not defined in .env');
       }
       const sent = await this.sendEmail(alertEmail, subject, bodyLines.join('\n'));
       

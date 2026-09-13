@@ -94,7 +94,7 @@ async function handleAllKeysExhausted(totalKeys: number) {
   }).catch(() => {});
 
   // Email Alert
-  const recipient = process.env.ALERT_EMAIL;
+  const recipient = process.env.REPORT_EMAIL;
   if (!recipient) return;
 
   try {
@@ -219,7 +219,7 @@ export const aiGatewayService = {
               ai_available: false,
               quota_exhausted: true,
               text: '',
-              error: `All ${keys.length} Gemini API keys exhausted. Alert sent to ${process.env.ALERT_EMAIL}. Retrying Key 1 next cycle.`
+              error: `All ${keys.length} Gemini API keys exhausted. Alert sent to ${process.env.REPORT_EMAIL}. Retrying Key 1 next cycle.`
             };
           }
           // Continue loop to try next key
