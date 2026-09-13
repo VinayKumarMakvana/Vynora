@@ -66,8 +66,8 @@ export class LeadSourcingService {
     const rotIdx = Math.floor(Date.now() / (4 * 3600 * 1000)) % areas.length;
     const area = areas[rotIdx];
 
-    // RESEARCH TARGET = 200 REAL BUSINESSES
-    const cap = 200; 
+    // RESEARCH TARGET = 800 RAW BUSINESSES (to guarantee we find 200 with valid MX emails)
+    const cap = 800; 
 
     const defaultGroups = 'amenity=dentist;amenity=clinic;amenity=doctors|office=it;office=telecommunication;office=company|office=lawyer;office=estate_agent;office=accountant;office=financial|industrial=factory;industrial=manufacturing;craft=builder|healthcare=hospital;tourism=hotel;leisure=resort|office=advertising_agency;office=consulting;office=architect|shop=jewelry;shop=beauty;shop=clothes;amenity=restaurant';
     const filterGroups = String(cfg.sourcing_osm_filters || defaultGroups).split('|').map(s => s.trim()).filter(Boolean);
@@ -265,10 +265,10 @@ export class LeadSourcingService {
       const has_contact = contact_key.length > 0;
       const contact_id = has_contact ? `CT-${company_id}-${contact_key.replace(/[^a-z0-9]+/gi, '-')}` : '';
 
-      // ── STRICT EMAIL GATE ──────────────────────────────────────────────────
-      // No email = can't contact = no point saving. Skip immediately.
-      if (!email_found || !syntaxOk || isDisposable) {
-        continue; // Save time, DB space, and AI quota — skip no-email leads entirely
+      // ── STRICT EMAIL & MX GATE (BEFORE AI) ─────────────────────────────────
+      // We ONLY want leads with a verified working email to save tokens and time.
+      if (!email_found || !syntaxOk || isDisposable || !mxFound) {
+        continue; // Discard immediately
       }
 
       try {
@@ -301,7 +301,17 @@ export class LeadSourcingService {
       let service_fit = 40;
       let evidenceText = description;
 
-      if (site_ok) {
+      const ind = String(biz.category).toLowerCase();
+      const isPremiumCategory = /health|clinic|dentist|hospital|shop|store|estate_agent|lawyer|architect/.test(ind);
+
+      if (!site_ok && isPremiumCategory) {
+        // NO-WEBSITE PREMIUM PRIORITIZATION
+        relevant_service = 'Website development';
+        service_fit = 95;
+        likely_pain_point = 'No digital presence or website';
+        evidenceText = 'Business is in a premium category but has no public website. Urgent need for digital presence to capture local search traffic.';
+      } else if (site_ok) {
+        // RUN AI ONLY IF WEBSITE EXISTS AND MX IS VERIFIED
         const textToAnalyze = (html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 1500) + ' ' + description).trim();
         const systemPrompt = `You are a B2B research assistant. Analyze the following public business text and return ONLY a strict JSON object with:
 {
@@ -324,7 +334,6 @@ Do not include markdown tags.`;
           }
         } catch (e) {
           // Fallback to basic heuristics if AI fails
-          const ind = String(biz.category).toLowerCase();
           if (/health|clinic|dentist|hospital/.test(ind)) { relevant_service = 'business workflow automation'; service_fit = 85; likely_pain_point = 'Manual patient intake'; }
           else if (/hotel|hospitality|resort/.test(ind)) { relevant_service = 'UI/UX'; service_fit = 82; likely_pain_point = 'Direct booking friction'; }
           else if (/factory|manufacturing|builder/.test(ind)) { relevant_service = 'business workflow automation'; service_fit = 80; likely_pain_point = 'Supply chain visibility'; }
@@ -344,7 +353,10 @@ Do not include markdown tags.`;
       const geography = /manchester|uk|united kingdom/.test((biz.city).toLowerCase()) ? 80 : 50;
 
       // QUALITY SCORE
-      const fit_score = Math.round(service_fit * 0.28 + digital_gap * 0.20 + evidenceScore * 0.16 + contactability * 0.18 + business_quality * 0.10 + geography * 0.08);
+      let fit_score = Math.round(service_fit * 0.28 + digital_gap * 0.20 + evidenceScore * 0.16 + contactability * 0.18 + business_quality * 0.10 + geography * 0.08);
+
+      // Force 95+ score for Premium No-Website leads so they go to the top of the queue
+      if (!site_ok && isPremiumCategory) fit_score = Math.max(fit_score, 95);
 
       const priority = fit_score >= 80 ? 'High' : (fit_score >= 60 ? 'Medium' : 'Low');
       const lead_id = `LEAD-OSM-${domain.replace(/[^a-z0-9]+/gi, '-')}`;
@@ -375,6 +387,11 @@ Do not include markdown tags.`;
           await this.logEvent(execution_id, lead_id, `Sourced high-fit ${biz.company} (${domain}). email=${email_status}, fit=${fit_score}`, 'Sourced', 'Low');
         }
         processedCount++;
+        
+        // Target specifically 200 fully verified leads per shift
+        if (processedCount >= 200) {
+          break;
+        }
       } catch (e) { }
     }
 

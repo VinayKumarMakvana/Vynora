@@ -88,7 +88,41 @@ export const getFeed = async (req: Request, res: Response) => {
 // ── LEADS ────────────────────────────────────────────────────────
 export const getLeads = async (req: Request, res: Response) => {
   try {
-    const leads = await Lead.find().sort({ createdAt: -1 }).limit(200);
+    const leads = await Lead.aggregate([
+      { $sort: { createdAt: -1 } },
+      { $limit: 200 },
+      {
+        $lookup: {
+          from: 'contacts',
+          localField: 'contact_id',
+          foreignField: 'contact_id',
+          as: 'contact'
+        }
+      },
+      {
+        $lookup: {
+          from: 'leadscores',
+          localField: 'lead_id',
+          foreignField: 'lead_id',
+          as: 'score'
+        }
+      },
+      {
+        $addFields: {
+          email: { $arrayElemAt: ['$contact.email', 0] },
+          mx: { $eq: [{ $arrayElemAt: ['$contact.email_status', 0] }, 'verified'] },
+          score: { $arrayElemAt: ['$score.fit_score', 0] },
+          priority: { $arrayElemAt: ['$score.priority', 0] }
+        }
+      },
+      {
+        $project: {
+          contact: 0,
+          'score.fit_score': 0,
+          'score.priority': 0
+        }
+      }
+    ]);
     res.json(leads);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch leads' });
@@ -132,11 +166,44 @@ export const updateConfig = async (req: Request, res: Response) => {
 // ── OUTREACH ─────────────────────────────────────────────────────
 export const getOutreachQueue = async (req: Request, res: Response) => {
   try {
-    // Leads in outbound queue (qualified and eligible)
-    const queueLeads = await Lead.find({
-      qualification_status: { $regex: /^qualified$/i },
-      outreach_eligible: true
-    }).sort({ createdAt: -1 }).limit(50);
+    const queueLeads = await Lead.aggregate([
+      { 
+        $match: { 
+          qualification_status: { $regex: /^qualified$/i },
+          outreach_eligible: true 
+        } 
+      },
+      { $sort: { createdAt: -1 } },
+      { $limit: 50 },
+      {
+        $lookup: {
+          from: 'contacts',
+          localField: 'contact_id',
+          foreignField: 'contact_id',
+          as: 'contact'
+        }
+      },
+      {
+        $lookup: {
+          from: 'leadscores',
+          localField: 'lead_id',
+          foreignField: 'lead_id',
+          as: 'scoreDoc'
+        }
+      },
+      {
+        $addFields: {
+          email: { $arrayElemAt: ['$contact.email', 0] },
+          fit_score: { $arrayElemAt: ['$scoreDoc.fit_score', 0] },
+        }
+      },
+      {
+        $project: {
+          contact: 0,
+          scoreDoc: 0
+        }
+      }
+    ]);
 
     res.json(queueLeads);
   } catch (error) {
