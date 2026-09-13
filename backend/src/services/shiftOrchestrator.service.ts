@@ -24,53 +24,7 @@ export const shiftOrchestratorService = {
       await leadSourcingService.runSourcing(`W00:${execution_id}`);
 
       // Phase 2: AI Needs Analysis (Research & Verification)
-      console.log('Phase 2: AI Needs Analysis & Verification...');
-      const newLeads = await Lead.find({ status: 'new', outreach_eligible: false });
-      
-      for (const lead of newLeads) {
-        // Mock Needs Analysis - Using Gemini AI to decide Pain Point & Service
-        const prompt = `Analyze this B2B Lead and identify their most likely digital pain point and the most relevant service VYNORA can offer (e.g. Website Redesign, SEO, AI Automation).
-        Lead Name: ${lead.raw_name || lead.company}
-        Domain: ${lead.domain}
-        Category: ${lead.category || 'Business'}
-        
-        Return ONLY a JSON object: {"pain_point": "...", "relevant_service": "...", "priority": "High/Medium/Low"}`;
-
-        const aiResult = await aiGatewayService.processAiRequest({ prompt, system_prompt: 'You are an expert B2B research analyst.', max_tokens: 150 });
-        
-        let pain_point = 'outdated digital presence';
-        let relevant_service = 'website redesign';
-        let priority = 'Medium';
-
-        if (aiResult.success) {
-          try {
-            const cleanedText = aiResult.text.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
-            const p = JSON.parse(cleanedText);
-            if (p.pain_point) pain_point = p.pain_point;
-            if (p.relevant_service) relevant_service = p.relevant_service;
-            if (p.priority) priority = p.priority;
-          } catch(e) {}
-        }
-
-        // Save Research (upsert to avoid duplicate key crash if lead is re-processed)
-        await Research.findOneAndUpdate(
-          { lead_id: lead.lead_id },
-          {
-            research_id: `RES-${lead.lead_id}`,
-            lead_id: lead.lead_id,
-            company_id: lead.company_id,
-            likely_pain_point: pain_point,
-            relevant_service: relevant_service,
-            signals: `priority:${priority}`,
-            status: 'completed'
-          },
-          { upsert: true }
-        );
-
-        // Verify and Mark Eligible
-        lead.outreach_eligible = true;
-        await lead.save();
-      }
+      console.log('Phase 2: Needs Analysis is now handled synchronously during Sourcing (Phase 1).');
 
       // Phase 3: Outbound Machine (Cap: 25-50)
       console.log('Phase 3: Outbound Outreach...');

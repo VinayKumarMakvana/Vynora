@@ -6,7 +6,7 @@ import { Message } from '../models/Message';
 import { Log } from '../models/Log';
 import { Followup } from '../models/Followup';
 import { aiGatewayService } from './aiGateway.service';
-import nodemailer from 'nodemailer';
+import { mailerService } from './mailer.service';
 
 export class FollowupEngineService {
   private async getConfig() {
@@ -20,19 +20,6 @@ export class FollowupEngineService {
     await Log.create({
       execution_id, workflow: 'VYNORA-W11-Followup-Engine', entity_id, action, result, severity, error, human_approval: false, log_time: new Date()
     } as any);
-  }
-
-  private async sendEmail(to: string, subject: string, text: string) {
-    try {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
-      });
-      const info = await transporter.sendMail({ from: process.env.GMAIL_USER, to, subject, text });
-      return { success: true, messageId: info.messageId };
-    } catch (e: any) {
-      return { success: false, error: e.message };
-    }
   }
 
   async runFollowups(sourceId?: string) {
@@ -123,6 +110,9 @@ export class FollowupEngineService {
 
         const system_prompt = `You are a consultative B2B writer for VYNORA, a digital development and automation company helping businesses improve websites, software, UX, mobile experiences and AI/workflow automation. Write like a real person. NEVER invent facts, metrics, case studies, client names, reviews or internal prospect data. If uncertain, phrase as observation/possibility, not fact. No fake urgency, no spam, no guaranteed ROI. Sign off exactly like this (never a placeholder):\nBest,\nVynora Team\n\nVinay Kumar Makvana\nFounder, VYNORA\nDirect Contact: ${process.env.CONTACT_EMAIL}`;
 
+        const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+        await delay(1500); // Prevent AI rate limits
+
         const aiResponse = await aiGatewayService.processAiRequest({
           prompt: promptLines,
           system_prompt,
@@ -148,7 +138,7 @@ export class FollowupEngineService {
         const ai_ready = success && !!body && !!subject;
 
         if (ai_ready) {
-          const emailRes = await this.sendEmail(email, subject, body);
+          const emailRes = await mailerService.sendEmail(email, subject, body);
           if (emailRes.success) {
             await Message.create({
               message_id: `MSG-${lead.lead_id}-fup${nextStep}`,

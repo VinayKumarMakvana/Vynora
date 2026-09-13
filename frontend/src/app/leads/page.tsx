@@ -18,7 +18,9 @@ export default function LeadsPage() {
   }, []);
 
   const fetchLeads = () => {
-    dashboardAPI.getLeads().then(data => setLeads(data)).catch(console.error);
+    dashboardAPI.getLeads().then(data => {
+      setLeads(Array.isArray(data) ? data : []);
+    }).catch(console.error);
   };
 
   const handleForceSourcing = async () => {
@@ -56,12 +58,12 @@ export default function LeadsPage() {
 
       <Card className="flex-1 flex flex-col min-h-[500px]">
         <CardHeader className="pb-4 border-b border-gray-800 bg-[#111827]">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <CardTitle className="text-lg text-gray-100">Lead Database</CardTitle>
               <CardDescription>200 Target / Shift (Currently showing last batch)</CardDescription>
             </div>
-            <div className="relative w-72">
+            <div className="relative w-full sm:w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
               <input 
                 type="text" 
@@ -186,9 +188,9 @@ export default function LeadsPage() {
             >
               <div className="p-6 border-b border-gray-800 flex items-start justify-between bg-gray-900">
                 <div>
-                  <h2 className="text-xl font-bold text-gray-100">{selectedLead.company}</h2>
+                  <h2 className="text-xl font-bold text-gray-100">{selectedLead.company || selectedLead.company_id || 'Unknown Company'}</h2>
                   <p className="text-sm text-gray-400 flex items-center gap-1 mt-1">
-                    <Globe className="h-3 w-3" /> www.{selectedLead.company.toLowerCase().replace(/ /g, "")}.com
+                    <Globe className="h-3 w-3" /> {selectedLead.domain || (selectedLead.company ? `${selectedLead.company.toLowerCase().replace(/ /g, '')}.com` : 'N/A')}
                   </p>
                 </div>
                 <button onClick={() => setSelectedLead(null)} className="p-2 bg-gray-800 rounded-full border border-gray-700 hover:bg-gray-700 text-gray-400 hover:text-gray-100 transition-colors">
@@ -200,14 +202,14 @@ export default function LeadsPage() {
                   <h3 className="text-sm font-semibold text-gray-100 mb-2 uppercase tracking-wider">AI Enrichment Notes</h3>
                   <div className="bg-amber-950/30 border border-amber-900/50 p-4 rounded-lg text-sm text-amber-200 flex items-start gap-3">
                     <FileText className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
-                    <p>{selectedLead.notes}</p>
+                    <p>{selectedLead.notes || 'No AI enrichment notes available.'}</p>
                   </div>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
                     <p className="text-xs text-gray-400 font-medium">Fit Score</p>
-                    <p className="text-2xl font-bold text-gray-100 mt-1">{selectedLead.score}/100</p>
+                    <p className="text-2xl font-bold text-gray-100 mt-1">{selectedLead.score ?? '—'}/100</p>
                   </div>
                   <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
                     <p className="text-xs text-gray-400 font-medium">MX Verification</p>
@@ -219,7 +221,7 @@ export default function LeadsPage() {
                 
                 <div className="pt-4 border-t border-gray-800">
                   <h3 className="text-sm font-semibold text-gray-100 mb-2">Primary Contact</h3>
-                  <p className="text-sm text-gray-300">{selectedLead.email}</p>
+                  <p className="text-sm text-gray-300">{selectedLead.email || <span className="text-gray-500 italic">No public email found</span>}</p>
                 </div>
               </div>
               <div className="p-4 border-t border-gray-800 bg-gray-900 flex gap-3">

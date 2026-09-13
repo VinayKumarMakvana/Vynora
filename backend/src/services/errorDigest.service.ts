@@ -1,21 +1,7 @@
 import { Log } from '../models/Log';
-import nodemailer from 'nodemailer';
+import { mailerService } from './mailer.service';
 
 export class ErrorDigestService {
-  private async sendEmail(to: string, subject: string, text: string) {
-    try {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
-      });
-      await transporter.sendMail({ from: process.env.GMAIL_USER, to, subject, text });
-      return true;
-    } catch (e: any) {
-      console.error('Email send failed:', e.message);
-      return false;
-    }
-  }
-
   async runDailyDigest() {
     try {
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -55,7 +41,7 @@ export class ErrorDigestService {
       if (!alertEmail) {
         throw new Error('REPORT_EMAIL is not defined in .env');
       }
-      const sent = await this.sendEmail(alertEmail, subject, bodyLines.join('\n'));
+      const sent = await mailerService.sendEmail(alertEmail, subject, bodyLines.join('\n'));
       
       console.log(`Daily error digest generated (count: ${count}), email sent to ${alertEmail}: ${sent}`);
       return { success: true, count };

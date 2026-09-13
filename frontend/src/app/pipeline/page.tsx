@@ -26,7 +26,8 @@ export default function PipelinePage() {
         "Closed Won (W13)": []
       };
 
-      (opportunities || []).forEach((opp: any) => {
+      const oppsArray = Array.isArray(opportunities) ? opportunities : [];
+      oppsArray.forEach((opp: any) => {
         const item = {
           id: opp.opportunity_id || opp._id,
           company: opp.company_id || "Unknown",

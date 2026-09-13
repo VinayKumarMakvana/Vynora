@@ -14,7 +14,7 @@ const contactSchema = new Schema({
   contact_id: { type: String, required: true, unique: true },
   name: { type: String, required: true },
   title: { type: String },
-  email: { type: String, required: true },
+  email: { type: String, required: true, index: true },
   email_status: { type: String },
   opt_out: { type: Boolean, default: false },
   decision_maker: { type: Boolean, default: false }

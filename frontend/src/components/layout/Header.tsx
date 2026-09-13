@@ -5,6 +5,7 @@ import { Bell, Search, Power, CheckCircle2, AlertCircle, Info, XCircle, X, Refre
 import { motion, AnimatePresence } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { dashboardAPI } from "@/lib/api";
+import { SidebarContent } from "@/components/layout/Sidebar";
 
 interface Notification {
   id: string;
@@ -77,6 +78,7 @@ export function Header() {
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const countdown = useNextCycleCountdown();
 
   const fetchNotifications = useCallback(async () => {
@@ -125,9 +127,17 @@ export function Header() {
   };
 
   return (
-    <header className="h-20 flex items-center justify-between px-8 bg-black border-b border-gray-800 sticky top-0 z-50">
-      <div className="flex items-center flex-1">
-        <div className="relative w-96 max-w-md hidden md:block">
+    <header className="h-20 flex items-center justify-between px-4 md:px-8 bg-black border-b border-gray-800 sticky top-0 z-50 w-full">
+      <div className="flex items-center flex-1 gap-4">
+        {/* Mobile Menu Button */}
+        <button 
+          onClick={() => setShowMobileMenu(true)}
+          className="md:hidden text-gray-400 hover:text-white transition-colors p-1"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+        </button>
+
+        <div className="relative w-full max-w-md hidden md:block">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
           <input 
             type="text" 
@@ -139,9 +149,9 @@ export function Header() {
       
       <div className="flex items-center gap-6">
         {/* Live Countdown */}
-          <div className="flex items-center gap-2 mr-4">
-            <span className="text-gray-400 text-sm font-medium">Next Shift:</span>
-            <div className="bg-indigo-950/50 text-indigo-400 px-3 py-1 rounded border border-indigo-900/50 font-mono text-sm tracking-wider">
+          <div className="flex items-center gap-2 mr-1 md:mr-4">
+            <span className="text-gray-400 text-xs md:text-sm font-medium hidden sm:inline">Next Shift:</span>
+            <div className="bg-indigo-950/50 text-indigo-400 px-2 md:px-3 py-1 rounded border border-indigo-900/50 font-mono text-xs md:text-sm tracking-wider">
               {countdown}
             </div>
           </div>
@@ -269,6 +279,38 @@ export function Header() {
           </AnimatePresence>
         </div>
       </div>
+
+      {/* Mobile Sidebar Overlay */}
+      <AnimatePresence>
+        {showMobileMenu && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowMobileMenu(false)}
+              className="fixed inset-0 bg-black/80 z-[100] md:hidden"
+            />
+            <motion.div
+              initial={{ x: "-100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "-100%" }}
+              transition={{ type: "spring", bounce: 0, duration: 0.4 }}
+              className="fixed top-0 left-0 bottom-0 w-72 bg-black border-r border-gray-800 z-[101] md:hidden shadow-2xl"
+            >
+              <div className="absolute top-6 right-4 z-50">
+                <button 
+                  onClick={() => setShowMobileMenu(false)}
+                  className="p-1 text-gray-400 hover:text-white bg-gray-900 rounded-md"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <SidebarContent onNavigate={() => setShowMobileMenu(false)} />
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </header>
   );
 }

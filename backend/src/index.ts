@@ -2,6 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import cron from 'node-cron';
+import rateLimit from 'express-rate-limit';
 import aiGatewayRoutes from './routes/aiGateway.routes';
 import outboundRoutes from './routes/outbound.routes';
 import inboundRoutes from './routes/inbound.routes';
@@ -44,8 +45,22 @@ const PORT = process.env.PORT || 3000;
 // Middleware - Webhooks must be mounted BEFORE global express.json() because Stripe needs raw body
 app.use('/api/webhooks', webhookRoutes);
 
+// Rate Limiting (Anti-DDOS for AI/Webhooks)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 500, // limit each IP to 500 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use(cors());
-app.use(express.json());
+// Parse JSON with a strict 10MB limit to prevent Heap Out of Memory crashes
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+// Apply rate limiter to all API routes
+app.use('/api', apiLimiter);
 
 // Routes
 app.use('/api', aiGatewayRoutes);
@@ -76,28 +91,48 @@ app.get('/api/vynora/health', (req, res) => {
 
 // Outbound logic is now handled in the Shift Orchestrator
 cron.schedule('* * * * *', async () => {
-  await inboundHandlerService.pollUnreadEmails();
+  try {
+    await inboundHandlerService.pollUnreadEmails();
+  } catch (e) {
+    console.error('Fatal error in pollUnreadEmails cron:', e);
+  }
 });
 
 cron.schedule('0 * * * *', async () => {
   console.log('Running hourly Meeting Reminder Sweep');
-  const meetingService = new MeetingService();
-  await meetingService.handleReminderSweep();
+  try {
+    const meetingService = new MeetingService();
+    await meetingService.handleReminderSweep();
+  } catch (e) {
+    console.error('Fatal error in Meeting Reminder Sweep cron:', e);
+  }
 });
 
 cron.schedule('0 8 * * *', async () => {
   console.log('Running daily Error Digest');
-  await errorDigestService.runDailyDigest();
+  try {
+    await errorDigestService.runDailyDigest();
+  } catch (e) {
+    console.error('Fatal error in Error Digest cron:', e);
+  }
 });
 
 cron.schedule('0 */4 * * *', async () => {
   console.log('Running 4-hourly Lead Sourcing via OSM');
-  await leadSourcingService.runSourcing();
+  try {
+    await leadSourcingService.runSourcing();
+  } catch (e) {
+    console.error('Fatal error in Lead Sourcing cron:', e);
+  }
 });
 
 cron.schedule('0 * * * *', async () => {
   console.log('Running hourly Follow-up Engine');
-  await followupEngineService.runFollowups();
+  try {
+    await followupEngineService.runFollowups();
+  } catch (e) {
+    console.error('Fatal error in Follow-up Engine cron:', e);
+  }
 });
 
 // Unified 8-Hour Shift Orchestrator
@@ -111,7 +146,54 @@ cron.schedule('0 */8 * * *', async () => {
   }
 });
 
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+// Graceful Shutdown Handler
+const gracefulShutdown = async (signal: string) => {
+  console.log(`\n[${signal}] Received. Shutting down gracefully...`);
+  
+  // 1. Stop all cron jobs safely (prevent new ones from starting)
+  console.log('Stopping background cron engines...');
+  const tasks = cron.getTasks();
+  // Depending on node-cron version, getTasks() returns a Map
+  for (const [_, task] of tasks) {
+    task.stop();
+  }
+
+  // 2. Stop accepting new HTTP requests
+  server.close(async () => {
+    console.log('Closed out remaining HTTP connections.');
+    
+    // 3. Close Database connection safely
+    try {
+      const mongoose = await import('mongoose');
+      await mongoose.connection.close(false);
+      console.log('MongoDB connection closed.');
+    } catch (err) {
+      console.error('Error during MongoDB disconnect', err);
+    }
+    
+    console.log('Graceful shutdown complete. Exiting process.');
+    process.exit(0);
+  });
+
+  // Force shutdown if it takes longer than 10s
+  setTimeout(() => {
+    console.error('Could not close connections in time, forcefully shutting down');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

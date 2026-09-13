@@ -106,7 +106,7 @@ budget: ${reqDoc.budget || ''}`.trim() : '';
       await Log.create({ execution_id: exec_id, workflow: wf, entity_id: oppId, action: 'Canonical requirements scoped', result: 'Scoped' });
 
       try {
-        await axios.post('https://vynoravinay.app.n8n.cloud/webhook/vynora/proposal-intake', {
+        await axios.post(`${process.env.N8N_WEBHOOK_URL}/proposal-intake`, {
           opportunity_id: oppId, lead_id: lead?.lead_id, contact_id: contact?.contact_id, company_id: company?.company_id,
           name: contact?.name, email: contact?.email, bdm_owner: opp.bdm, pain_points: conv?.pain_point,
           recommended_service: opp.service, summary: s(r.scope)

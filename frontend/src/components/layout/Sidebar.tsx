@@ -23,7 +23,7 @@ const routes = [
   { label: "Engine Config", icon: Settings, href: "/settings", color: "text-neutral-400" },
 ];
 
-export function Sidebar() {
+export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const [engineStatus, setEngineStatus] = useState<'checking' | 'active' | 'offline'>('checking');
 
@@ -47,11 +47,11 @@ export function Sidebar() {
   }, []);
 
   return (
-    <div className="space-y-4 py-4 flex flex-col h-full bg-black shadow-[2px_0_15px_rgba(0,0,0,0.5)]">
-      <div className="px-3 py-2 flex-1">
-        <Link href="/" className="block px-4 mb-12 mt-2">
+    <div className="flex flex-col h-full bg-black shadow-[2px_0_15px_rgba(0,0,0,0.5)]">
+      <div className="px-3 py-6 flex-1">
+        <Link href="/" onClick={onNavigate} className="block px-4 mb-12">
           <img 
-            src="/logo.png" 
+            src="/logo.svg" 
             alt="VYNORA Technology Innovation Impact" 
             className="w-full h-auto object-contain max-w-[200px]"
           />
@@ -61,6 +61,7 @@ export function Sidebar() {
             <Link
               key={route.href}
               href={route.href}
+              onClick={onNavigate}
               className={cn(
                 "text-sm group flex p-3 w-full justify-start font-medium cursor-pointer rounded-lg transition-all",
                 pathname === route.href ? "text-indigo-400 bg-indigo-950/50" : "text-gray-400 hover:text-gray-100 hover:bg-gray-800"
@@ -74,7 +75,7 @@ export function Sidebar() {
           ))}
         </div>
       </div>
-      <div className="px-6 py-4">
+      <div className="px-6 py-4 pb-8 md:pb-4">
         <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 flex items-center justify-between">
           <div className="flex flex-col">
             <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">System Status</span>
@@ -108,4 +109,8 @@ export function Sidebar() {
       </div>
     </div>
   );
+}
+
+export function Sidebar() {
+  return <SidebarContent />;
 }

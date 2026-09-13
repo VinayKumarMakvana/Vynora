@@ -7,7 +7,7 @@ import { Conversation } from '../models/Conversation';
 import { Meeting } from '../models/Meeting';
 import { Log } from '../models/Log';
 import { aiGatewayService } from './aiGateway.service';
-import nodemailer from 'nodemailer';
+import { mailerService } from './mailer.service';
 import axios from 'axios';
 
 export class MeetingService {
@@ -43,20 +43,6 @@ export class MeetingService {
       human_approval,
       log_time: new Date()
     } as any);
-  }
-
-  private async sendEmail(to: string, subject: string, text: string) {
-    try {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
-      });
-      await transporter.sendMail({ from: process.env.GMAIL_USER, to, subject, text });
-      return true;
-    } catch (e: any) {
-      console.error('Email send failed:', e.message);
-      return false;
-    }
   }
 
   async handleMeetingWebhook(body: any) {
@@ -112,7 +98,7 @@ export class MeetingService {
     const context_ok = !!oppId || !!leadId;
     if (!context_ok) {
       const msg = `A meeting request could not be processed because the opportunity/lead was not found.\nOpportunity: ${oppId}\nLead: ${leadId}\nNo meeting was created.`;
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Scheduling blocked — context not found (${oppId})`, msg);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Scheduling blocked — context not found (${oppId})`, msg);
       await this.logEvent(oppId, 'Scheduling request could not be processed — opportunity/lead not found', 'Missing Context', 'Medium', undefined, true);
       return { status: 'error', reason: 'missing_context', opportunity_id: oppId };
     }
@@ -187,7 +173,8 @@ export class MeetingService {
     let resStatus = ''; let resReason = '';
 
     if (has_email) {
-      const sent = await this.sendEmail(email, subject, emailBody);
+      const emailRes = await mailerService.sendEmail(email, subject, emailBody);
+      const sent = emailRes.success;
       if (sent) {
         resStatus = 'proposed';
         await this.logEvent(oppId, `Meeting proposal sent to prospect (used_ai=${used_ai})`, 'Proposed', 'Low');
@@ -198,7 +185,7 @@ export class MeetingService {
       }
     } else {
       const notifyMsg = `No prospect email on file — please reach out manually.\n\nProspect: ${contact_name}\nCompany: ${company_name}\nProposed slots: ${slots_text}\n\nDraft:\n${emailBody}`;
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Manual scheduling needed — ${company_name} (${oppId})`, notifyMsg);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Manual scheduling needed — ${company_name} (${oppId})`, notifyMsg);
       notes = `No prospect email — routed to human. Proposed slots: ${slots_text}`;
       resStatus = 'human_scheduling'; resReason = 'no_prospect_email';
       await this.logEvent(oppId, 'Meeting scheduling routed to human — no prospect email', 'Human Route', 'Low', undefined, true);
@@ -236,7 +223,7 @@ export class MeetingService {
 
     if (!tz_ok) {
       const notifyMsg = `A confirmation was requested but the timezone is ambiguous and materially affects scheduling. Please clarify with the prospect before confirming.\n\nProspect: ${contact.name || 'there'}\nCompany: ${company.name || ''}\nRequested time: ${sched}\nMeeting: ${meeting_id}`;
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Ambiguous timezone — confirm scheduling (${oppId})`, notifyMsg);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Ambiguous timezone — confirm scheduling (${oppId})`, notifyMsg);
       await Meeting.updateOne({ meeting_id }, { status: 'availability_pending', notes: `Confirm blocked — ambiguous timezone for ${sched}. Routed to human.` });
       await this.logEvent(meeting_id, 'Confirmation blocked — ambiguous timezone; routed to human (no silent assumption)', 'Ambiguous Timezone', 'Medium', undefined, true);
       return { status: 'needs_timezone', reason: 'ambiguous_timezone', meeting_id };
@@ -246,7 +233,10 @@ export class MeetingService {
     const emailBody = `Hi ${contact.name || 'there'},\n\nYour discovery ${meeting.channel || 'call'} is confirmed.\n\nDate/time: ${sched}\nTimezone: ${tz_resolved}\nDuration: ${duration}\n\nLooking forward to speaking.\n\nVinay Kumar Makvana\nFounder, VYNORA\nDirect Contact: ${process.env.CONTACT_EMAIL}`;
 
     let sent = false; let notes = `Confirmed for ${sched} (${tz_resolved}). ${s(body.notes)}`;
-    if (s(contact.email).includes('@')) sent = await this.sendEmail(contact.email, subject, emailBody);
+    if (s(contact.email).includes('@')) {
+      const emailRes = await mailerService.sendEmail(contact.email, subject, emailBody);
+      sent = emailRes.success;
+    }
 
     if (sent) {
       await Meeting.updateOne({ meeting_id }, { status: 'confirmed', scheduled_at: new Date(sched), timezone: tz_resolved, duration, reminder_key, reminder_sent: false, confirmation_sent: true, notes });
@@ -319,7 +309,7 @@ export class MeetingService {
 
     if (!ai_ready) {
       const msg = `AI extraction was unavailable. Raw discovery notes preserved for manual structuring before W03 handoff.\n\nMeeting: ${meeting_id}\nError: ${aiRes.error || 'AI unavailable'}\n\nRaw notes:\n${raw}`;
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Discovery extraction pending — ${company.name || 'Company'} (${meeting_id})`, msg);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Discovery extraction pending — ${company.name || 'Company'} (${meeting_id})`, msg);
       await Meeting.updateOne({ meeting_id }, { discovery_status: 'extraction_pending', notes: `Raw discovery preserved — AI extraction unavailable. Notes: ${raw}` });
       await this.logEvent(meeting_id, 'Discovery AI unavailable — raw preserved, routed to human, no fabrication', 'Discovery Pending', 'Medium', aiRes.error || 'AI unavailable', true);
       return { status: 'discovery_extraction_pending', meeting_id };
@@ -366,7 +356,8 @@ export class MeetingService {
         const subject = `Reminder: your VYNORA discovery call — ${m.scheduled_at}`;
         const msg = `Hi ${contact?.name || 'there'},\n\nA quick reminder about our upcoming discovery ${m.channel || 'call'}.\n\nDate/time: ${m.scheduled_at}\nTimezone: ${m.timezone}\nDuration: ${m.duration}\n\nSee you then.\n\nVinay Kumar Makvana\nFounder, VYNORA\nDirect Contact: ${process.env.CONTACT_EMAIL}`;
         
-        const sent = await this.sendEmail(email, subject, msg);
+        const emailRes = await mailerService.sendEmail(email, subject, msg);
+        const sent = emailRes.success;
         if (sent) {
           m.reminder_sent = true;
           m.reminder_key = `REMINDER-${m.meeting_id}-${reminderHours}h`;

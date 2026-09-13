@@ -11,6 +11,7 @@ import { Proposal } from '../models/Proposal';
 import { Conversation } from '../models/Conversation';
 import { Approval } from '../models/Approval';
 import { aiGatewayService } from './aiGateway.service';
+import { mailerService } from './mailer.service';
 import crypto from 'crypto';
 
 interface NegotiatePayload {
@@ -63,22 +64,6 @@ export class NegotiationEngineService {
     } as any);
   }
 
-  private async sendEmail(to: string, subject: string, text: string, html?: string) {
-    try {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
-      });
-      const mailOptions: any = { from: process.env.GMAIL_USER, to, subject };
-      if (html) mailOptions.html = html;
-      else mailOptions.text = text;
-      
-      const info = await transporter.sendMail(mailOptions);
-      return { success: true, messageId: info.messageId };
-    } catch (e: any) {
-      return { success: false, error: e.message };
-    }
-  }
 
   async processRequest(payload: NegotiatePayload) {
     const action = (payload.action || 'negotiate').toLowerCase();
@@ -145,7 +130,7 @@ export class NegotiationEngineService {
     if (pre_route !== 'ok') {
       if (pre_route === 'missing_context') {
         await this.logEvent(execution_id, opp_id, 'Negotiation request could not be processed — opportunity or sent proposal not found', 'Missing Context', 'Medium', '', true);
-        await this.sendEmail(cfg.approval_email, `[VYNORA] Negotiation blocked — missing context (${opp_id})`, `A negotiation request could not be processed because the opportunity or its sent proposal was not found.\n\nOpportunity: ${opp_id}\nOpportunity found: ${opp_ok}\nProposal found: ${prop_ok}\n\nNothing was sent or changed.`);
+        await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Negotiation blocked — missing context (${opp_id})`, `A negotiation request could not be processed because the opportunity or its sent proposal was not found.\n\nOpportunity: ${opp_id}\nOpportunity found: ${opp_ok}\nProposal found: ${prop_ok}\n\nNothing was sent or changed.`);
         return { status: 'error', reason: 'missing_context', opportunity_id: opp_id };
       }
       if (pre_route === 'opt_out') {
@@ -206,7 +191,7 @@ export class NegotiationEngineService {
 
     if (!aiRes.success) {
       await this.logEvent(execution_id, opp_id, 'Negotiation deferred — AI unavailable; message stored, no fabricated reply sent, held for human/retry', 'AI Unavailable', 'Medium', aiRes.error, true);
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Negotiation reply deferred — AI unavailable (${opp_id})`, `A prospect negotiation message arrived but the AI classifier/drafter is unavailable, so no automated reply was generated or sent. The message is stored and the opportunity is held pending.\n\nOpportunity: ${opp_id}\nProspect: ${contact?.name} <${contact?.email}>\n\nProspect message:\n${msg}\n\nPlease reply manually or retry once AI is available.`);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Negotiation reply deferred — AI unavailable (${opp_id})`, `A prospect negotiation message arrived but the AI classifier/drafter is unavailable, so no automated reply was generated or sent. The message is stored and the opportunity is held pending.\n\nOpportunity: ${opp_id}\nProspect: ${contact?.name} <${contact?.email}>\n\nProspect message:\n${msg}\n\nPlease reply manually or retry once AI is available.`);
       await Opportunity.findOneAndUpdate({ opportunity_id: opp_id }, { stage: 'Negotiation', proposal_status: 'Negotiation Pending (AI)' } as any);
       return { status: 'deferred', reason: 'ai_unavailable', opportunity_id: opp_id };
     }
@@ -269,8 +254,8 @@ export class NegotiationEngineService {
 
     if (nego_route === 'respond_safe') {
       const concessionLine = concession
-        ? `You MAY offer an adjusted total price of exactly ${cfg.currency} ${allowed_price} (this is the ONLY price you may state; do not go lower). Payment terms remain 50% upfront and 50% on delivery.`
-        : `Do NOT change the price. Keep the total at ${cfg.currency} ${price} and payment terms at 50% upfront / 50% on delivery. Address the concern with value, clarity and reassurance only.`;
+        ? `You MAY offer an adjusted total price of exactly ${cfg.currency} ${allowed_price} (this is the ONLY price you may state; do not go lower). Payment terms remain 50% upfront and 50% on delivery via Binance (preferred) or PayPal.`
+        : `Do NOT change the price. Keep the total at ${cfg.currency} ${price} and payment terms at 50% upfront / 50% on delivery via Binance (preferred) or PayPal. Address the concern with value, clarity and reassurance only.`;
       
       const draft_sys_prompt = `You are the founder of VYNORA replying to a prospect during negotiation. Use ONLY the facts provided. NEVER invent capabilities, discounts, prices, timelines or commitments. NEVER change the payment structure. Stay strictly within the commercial constraints given. End with exactly this sign-off and nothing after it:\nVinay Kumar Makvana\nFounder, VYNORA\nDirect Contact: ${process.env.CONTACT_EMAIL}`;
       const draft_lines = [
@@ -295,7 +280,7 @@ export class NegotiationEngineService {
       }
 
       if (aiDraft.success && subject && body_html && contact?.email) {
-        const emailRes = await this.sendEmail(contact.email, subject, body_html, body_html);
+        const emailRes = await mailerService.sendEmail(contact.email, subject, body_html, body_html);
         if (emailRes.success) {
           await Message.create({
             message_id: `MSG-${nego_out_key}`, conversation_id, lead_id, contact_id, opportunity_id: opp_id,
@@ -319,7 +304,7 @@ export class NegotiationEngineService {
           return { status: 'send_failed', opportunity_id: opp_id };
         }
       } else {
-        await this.sendEmail(cfg.approval_email, `[VYNORA] Negotiation reply needs a human — ${company?.name} (${opp_id})`, `A negotiation reply was authorised within commercial rules but no usable draft could be generated (AI/draft unavailable). No message was sent to the prospect.\n\nOpportunity: ${opp_id}\nObjection: ${objection_type}\nAuthority: ${authority_reason}\nProspect message:\n${msg}\n\nPlease reply manually or retry.`);
+        await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Negotiation reply needs a human — ${company?.name} (${opp_id})`, `A negotiation reply was authorised within commercial rules but no usable draft could be generated (AI/draft unavailable). No message was sent to the prospect.\n\nOpportunity: ${opp_id}\nObjection: ${objection_type}\nAuthority: ${authority_reason}\nProspect message:\n${msg}\n\nPlease reply manually or retry.`);
         await this.logEvent(execution_id, opp_id, 'Negotiation reply authorised but draft unavailable — routed to human, prospect NOT emailed', 'Draft Deferred', 'Medium', aiDraft.error, true);
         return { status: 'draft_deferred', opportunity_id: opp_id };
       }
@@ -330,7 +315,7 @@ export class NegotiationEngineService {
         await this.logEvent(execution_id, opp_id, `Material scope change routed to W03 for re-scope + W06 revision: ${k.scope_change_summary}`, 'Scope Change', 'Low');
         return { status: 'scope_change', handed_to: 'W03', opportunity_id: opp_id };
       } catch (e: any) {
-        await this.sendEmail(cfg.approval_email, `[VYNORA] Scope-change handoff to W03 failed — ${opp_id}`, `A scope change was detected during negotiation but the handoff to W03 (re-scope) failed. No proposal revision was requested.\n\nOpportunity: ${opp_id}\nRequested change: ${k.scope_change_summary}\n\nPlease re-send to W03 or handle manually.`);
+        await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Scope-change handoff to W03 failed — ${opp_id}`, `A scope change was detected during negotiation but the handoff to W03 (re-scope) failed. No proposal revision was requested.\n\nOpportunity: ${opp_id}\nRequested change: ${k.scope_change_summary}\n\nPlease re-send to W03 or handle manually.`);
         await this.logEvent(execution_id, opp_id, 'Scope-change handoff to W03 failed — no revision requested; safe to retry', 'Handoff Failed', 'High', 'W03 webhook call failed', true);
         return { status: 'scope_change_handoff_failed', opportunity_id: opp_id };
       }
@@ -341,7 +326,7 @@ export class NegotiationEngineService {
         await this.logEvent(execution_id, opp_id, 'Verbal yes detected — handed to W14 Closing with verbal (weak) evidence; W14 requires human confirmation before Closed Won. No auto-close, no payment.', 'Verbal Yes', 'Low');
         return { status: 'verbal_yes', handed_to: 'W14', opportunity_id: opp_id };
       } catch (e: any) {
-        await this.sendEmail(cfg.approval_email, `[VYNORA] Verbal-yes handoff to W14 failed — ${opp_id}`, `A verbal yes was detected but the handoff to W14 Closing failed. The deal was NOT closed and no payment was requested.\n\nOpportunity: ${opp_id}\n\nPlease re-send to W14 or handle manually.`);
+        await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Verbal-yes handoff to W14 failed — ${opp_id}`, `A verbal yes was detected but the handoff to W14 Closing failed. The deal was NOT closed and no payment was requested.\n\nOpportunity: ${opp_id}\n\nPlease re-send to W14 or handle manually.`);
         await this.logEvent(execution_id, opp_id, 'Verbal-yes handoff to W14 failed — deal NOT closed; safe to retry', 'Handoff Failed', 'High', 'W14 webhook call failed', true);
         return { status: 'verbal_yes_handoff_failed', opportunity_id: opp_id };
       }
@@ -355,11 +340,11 @@ export class NegotiationEngineService {
         status: 'pending', approval_token: 'nego'
       } as any, { upsert: true });
       await Opportunity.findOneAndUpdate({ opportunity_id: opp_id }, { stage: 'Negotiation', proposal_status: 'Approval Pending' } as any);
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Negotiation needs approval — ${company?.name} (${opp_id})`, `A negotiation request is outside autonomous commercial authority and needs your decision. The prospect has NOT been emailed anything.\n\nCompany: ${company?.name}\nProspect: ${contact?.name} <${contact?.email}>\nOpportunity: ${opp_id}\nObjection type: ${objection_type}\n\nCurrent price: ${cfg.currency} ${price}\nRequested discount: ${k.requested_discount_percent}%  |  Requested amount: ${k.requested_amount}\nRequested payment terms: ${k.requested_payment_terms}\nDiscount authority: ${cfg.discount_max_percent}%  |  Allowed band: ${cfg.currency} ${cfg.price_min}-${cfg.price_max}\n\nWhy approval is required: ${authority_reason}\n\nProspect message:\n${msg}\n\nApproval record: ${approval_id}\nApprove: send apply_approval (decision=approved) to negotiate webhook; Reject: decision=rejected.`);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Negotiation needs approval — ${company?.name} (${opp_id})`, `A negotiation request is outside autonomous commercial authority and needs your decision. The prospect has NOT been emailed anything.\n\nCompany: ${company?.name}\nProspect: ${contact?.name} <${contact?.email}>\nOpportunity: ${opp_id}\nObjection type: ${objection_type}\n\nCurrent price: ${cfg.currency} ${price}\nRequested discount: ${k.requested_discount_percent}%  |  Requested amount: ${k.requested_amount}\nRequested payment terms: ${k.requested_payment_terms}\nDiscount authority: ${cfg.discount_max_percent}%  |  Allowed band: ${cfg.currency} ${cfg.price_min}-${cfg.price_max}\n\nWhy approval is required: ${authority_reason}\n\nProspect message:\n${msg}\n\nApproval record: ${approval_id}\nApprove: send apply_approval (decision=approved) to negotiate webhook; Reject: decision=rejected.`);
       await this.logEvent(execution_id, opp_id, `Negotiation held for human approval: ${authority_reason}; prospect NOT emailed`, 'Approval Pending', 'Medium', '', true);
       return { status: 'approval_pending', opportunity_id: opp_id, approval_id };
     } else if (nego_route === 'human_review') {
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Negotiation needs human review — ${company?.name} (${opp_id})`, `A negotiation message needs a human. Nothing was sent to the prospect and no commercial change was made.\n\nReason: ${authority_reason}\nObjection type: ${objection_type}\nOutcome signal: ${outcome}\nOpportunity: ${opp_id}\nProspect: ${contact?.name} <${contact?.email}>\n\nProspect message:\n${msg}`);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Negotiation needs human review — ${company?.name} (${opp_id})`, `A negotiation message needs a human. Nothing was sent to the prospect and no commercial change was made.\n\nReason: ${authority_reason}\nObjection type: ${objection_type}\nOutcome signal: ${outcome}\nOpportunity: ${opp_id}\nProspect: ${contact?.name} <${contact?.email}>\n\nProspect message:\n${msg}`);
       await this.logEvent(execution_id, opp_id, `Negotiation routed to human review: ${authority_reason}; prospect NOT emailed`, 'Human Review', 'Medium', '', true);
       return { status: 'human_review', opportunity_id: opp_id, objection_type };
     }
@@ -406,14 +391,14 @@ export class NegotiationEngineService {
     const apply_out_key = `NEGO-APPLY-${opp_id}-${approval_id}`;
 
     if (route === 'apply_send') {
-      const sys_prompt = `You are the founder of VYNORA sending a prospect the terms your team just approved during negotiation. Use ONLY the facts provided. NEVER invent capabilities or change the approved commercial terms. Payment stays 50% upfront / 50% on delivery. End with exactly this sign-off and nothing after it:\nVinay Kumar Makvana\nFounder, VYNORA\nDirect Contact: ${process.env.CONTACT_EMAIL}`;
+      const sys_prompt = `You are the founder of VYNORA sending a prospect the terms your team just approved during negotiation. Use ONLY the facts provided. NEVER invent capabilities or change the approved commercial terms. Payment stays 50% upfront / 50% on delivery via Binance (preferred) or PayPal. End with exactly this sign-off and nothing after it:\nVinay Kumar Makvana\nFounder, VYNORA\nDirect Contact: ${process.env.CONTACT_EMAIL}`;
       const draft_lines = [
         `Write a concise, warm confirmation reply presenting the approved terms. Return ONLY JSON: {"subject":"...","body_html":"..."}.`,
         `Prospect: ${contact?.name || 'there'}`,
         `Approved outcome: ${appr?.requested_action || ''}`,
         `Approval note from our side: ${r.decision_notes || 'approved'}`,
         `Scope: ${prop?.scope || ''}`,
-        `Confirm the way forward and invite them to proceed with 50% upfront and 50% on delivery. Keep under 200 words.`
+        `Confirm the way forward and invite them to proceed with 50% upfront and 50% on delivery via Binance (preferred) or PayPal. Keep under 200 words.`
       ];
 
       const aiDraft = await aiGatewayService.processAiRequest({ prompt: draft_lines.join('\n'), system_prompt: sys_prompt, temperature: 0.4, max_tokens: 1000 });
@@ -426,7 +411,7 @@ export class NegotiationEngineService {
       }
 
       if (aiDraft.success && subject && body_html && contact?.email) {
-        const emailRes = await this.sendEmail(contact.email, subject, body_html, body_html);
+        const emailRes = await mailerService.sendEmail(contact.email, subject, body_html, body_html);
         if (emailRes.success) {
           await Message.create({
             message_id: `MSG-${apply_out_key}`, conversation_id, lead_id, contact_id: contact.contact_id, opportunity_id: opp_id,
@@ -447,18 +432,18 @@ export class NegotiationEngineService {
           return { status: 'approved_send_failed', approval_id };
         }
       } else {
-        await this.sendEmail(cfg.approval_email, `[VYNORA] Approved offer needs manual send — ${opp_id}`, `You approved a negotiation concession but no usable draft could be generated (AI unavailable). Nothing was sent to the prospect and the approval was left pending.\n\nOpportunity: ${opp_id}\nApproved: ${appr?.requested_action}\n\nPlease send manually or retry.`);
+        await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Approved offer needs manual send — ${opp_id}`, `You approved a negotiation concession but no usable draft could be generated (AI unavailable). Nothing was sent to the prospect and the approval was left pending.\n\nOpportunity: ${opp_id}\nApproved: ${appr?.requested_action}\n\nPlease send manually or retry.`);
         await this.logEvent(execution_id, opp_id, 'Approved offer draft unavailable — approval left pending, prospect NOT emailed', 'Draft Deferred', 'Medium', aiDraft.error, true);
         return { status: 'approved_draft_deferred', approval_id };
       }
     } else if (route === 'apply_reject') {
       await Approval.findOneAndUpdate({ approval_id }, { status: 'rejected', decided_by: r.decided_by, decided_at: new Date(), decision_notes: r.decision_notes } as any);
       await Opportunity.findOneAndUpdate({ opportunity_id: opp_id }, { stage: 'Negotiation', proposal_status: 'Concession Rejected' } as any);
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Concession rejected — ${opp_id}`, `The requested negotiation concession was rejected. The rejected offer was NOT sent to the prospect and the negotiation state is preserved. Please craft a safe alternative or follow up manually.\n\nOpportunity: ${opp_id}\nApproval: ${approval_id}\nRequested: ${appr?.requested_action}\nNote: ${r.decision_notes}`);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Concession rejected — ${opp_id}`, `The requested negotiation concession was rejected. The rejected offer was NOT sent to the prospect and the negotiation state is preserved. Please craft a safe alternative or follow up manually.\n\nOpportunity: ${opp_id}\nApproval: ${approval_id}\nRequested: ${appr?.requested_action}\nNote: ${r.decision_notes}`);
       await this.logEvent(execution_id, opp_id, `Concession rejected (${approval_id}) — rejected offer NOT sent, negotiation state preserved, routed to human`, 'Rejected', 'Medium', '', true);
       return { status: 'rejected', approval_id, opportunity_id: opp_id };
     } else if (route === 'apply_block') {
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Approved offer NOT sent — ${opp_id}`, `An approved negotiation offer could not be sent. Reason: ${reason}. Nothing was sent to the prospect.\n\nOpportunity: ${opp_id}\nApproval: ${approval_id}`);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Approved offer NOT sent — ${opp_id}`, `An approved negotiation offer could not be sent. Reason: ${reason}. Nothing was sent to the prospect.\n\nOpportunity: ${opp_id}\nApproval: ${approval_id}`);
       await this.logEvent(execution_id, opp_id, `Approved offer blocked — ${reason}; nothing sent`, 'Blocked', 'Medium', '', true);
       return { status: 'blocked', reason, approval_id };
     } else if (route === 'apply_missing') {

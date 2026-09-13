@@ -35,6 +35,7 @@ export const inboundHandlerService = {
 
       const messages = await connection.search(['UNSEEN'], { bodies: ['HEADER', 'TEXT'], markSeen: false });
 
+      const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
       for (const item of messages) {
         const headerPart = item.parts.find((p: any) => p.which === 'HEADER');
         const textPart = item.parts.find((p: any) => p.which === 'TEXT');
@@ -74,12 +75,22 @@ export const inboundHandlerService = {
 
         // AI Classification
         const sysPrompt = 'You are an inbox triage analyst. Output ONLY JSON: { category, confidence, is_positive, sentiment, intent, pain_points, recommended_service, summary, suggested_next_action, next_best_action, unsubscribe }';
+        await delay(1500); // Prevent AI rate limits
         const ai = await aiGatewayService.processAiRequest({ prompt: `Prospect: ${contact.name}\nSubject: ${subject}\nBody: ${body}`, system_prompt: sysPrompt, temperature: 0, max_tokens: 800 });
         
-        let p: any = { category: 'Unknown', is_positive: false, recommended_service: 'Unknown', unsubscribe: false };
-        if (ai.success) {
-          try { Object.assign(p, JSON.parse(ai.text.replace(/^\s*```json\s*/i,'').replace(/```\s*$/,'').trim())); } catch (e) {}
+        if (!ai.success) {
+          console.error('AI classification failed. Skipping email to retry next cycle.');
+          await Log.create({ execution_id: exec_id, workflow: wf, entity_id: messageId, action: 'AI Failure', result: 'Skipped', error: ai.error, severity: 'Medium' } as any);
+          continue; // Skip marking \Seen to avoid data loss
         }
+
+        let p: any = { category: 'Unknown', is_positive: false, recommended_service: 'Unknown', unsubscribe: false };
+        try { 
+          let text = ai.text.trim();
+          const start = text.indexOf('{'); const end = text.lastIndexOf('}');
+          if (start !== -1 && end !== -1 && end > start) text = text.slice(start, end + 1);
+          Object.assign(p, JSON.parse(text)); 
+        } catch (e) {}
 
         const bucket = (['Interested', 'Meeting Request', 'Information Request', 'Follow-up'].includes(p.category) && p.is_positive) ? 'positive' : 
                        (['Not Interested', 'Wrong Contact', 'Out of Office', 'Spam/Irrelevant', 'Unsubscribe'].includes(p.category) ? 'negative' : 'unknown');
@@ -87,14 +98,20 @@ export const inboundHandlerService = {
         if (bucket === 'positive') {
           await Lead.updateOne({ lead_id: lead.lead_id }, { qualification_status: p.category, stage: 'Engaged', status: 'active', opportunity_id: oppId, notes: `Reply: ${p.category} | ${p.summary}`, last_contact_date: new Date() });
           await Opportunity.findOneAndUpdate({ opportunity_id: oppId }, { lead_id: lead.lead_id, service: p.recommended_service, stage: p.category, bdm: lead.bdm_owner, discovery_date: new Date() }, { upsert: true });
-          axios.post('https://vynoravinay.app.n8n.cloud/webhook/vynora/proposal-intake', { opportunity_id: oppId, lead_id: lead.lead_id, email: from, summary: p.summary }).catch(() => {});
+          axios.post(`${process.env.N8N_WEBHOOK_URL}/proposal-intake`, { opportunity_id: oppId, lead_id: lead.lead_id, email: from, summary: p.summary }).catch((e) => {
+            Log.create({ execution_id: exec_id, workflow: wf, entity_id: oppId, action: 'Webhook Failed', result: 'Error', error: e.message, severity: 'High' } as any).catch(()=>{});
+          });
           
           // AI AUTO-DRAFTING (Second AI Call)
           const draftSys = 'You are a senior sales closer for VYNORA. Write a polite, professional, and highly concise reply addressing the prospect\'s exact email. Suggest a brief 10-minute introductory call. End with a simple signature. Do not use placeholders. Return ONLY JSON: { "subject": "Re: ...", "body": "..." }';
+          await delay(1500); // Prevent AI rate limits
           const draftAi = await aiGatewayService.processAiRequest({ prompt: `Prospect: ${contact.name}\nReceived Email: ${body}\nContext: ${p.summary}`, system_prompt: draftSys, temperature: 0.5, max_tokens: 300 });
           if (draftAi.success) {
             try {
-              const parsed = JSON.parse(draftAi.text.replace(/^\s*```json\s*/i,'').replace(/```\s*$/,'').trim());
+              let text = draftAi.text.trim();
+              const start = text.indexOf('{'); const end = text.lastIndexOf('}');
+              if (start !== -1 && end !== -1 && end > start) text = text.slice(start, end + 1);
+              const parsed = JSON.parse(text);
               await Message.create({ 
                 message_id: `MSG-DRAFT-${Date.now()}`, 
                 conversation_id: convId, 

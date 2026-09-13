@@ -37,8 +37,8 @@ export default function Home() {
         dashboardAPI.getStats(),
         dashboardAPI.getFeed()
       ]);
-      setStatsData(stats);
-      setFeedLogs(feed);
+      setStatsData(stats || {});
+      setFeedLogs(Array.isArray(feed) ? feed : []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -118,9 +118,9 @@ export default function Home() {
 
   return (
     <div className="space-y-8 pb-10">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-3xl font-bold tracking-tight text-gray-100 flex items-center gap-3">
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-100 flex items-center gap-3">
             Mission Control
           </h1>
           <p className="text-gray-400 text-sm">Live overview of Vynora AI Sales Agency operations.</p>

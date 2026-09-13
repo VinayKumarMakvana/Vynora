@@ -1,4 +1,3 @@
-import nodemailer from 'nodemailer';
 import { Lead } from '../models/Lead';
 import { Contact } from '../models/Contact';
 import { Message } from '../models/Message';
@@ -11,21 +10,9 @@ import { Conversation } from '../models/Conversation';
 import { Log } from '../models/Log';
 import { Config } from '../models/Config';
 import { LeadScore } from '../models/LeadScore';
+import { mailerService } from './mailer.service';
 
 export class ShiftReportService {
-  private async sendEmail(to: string, subject: string, text: string) {
-    try {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
-      });
-      await transporter.sendMail({ from: process.env.GMAIL_USER, to, subject, text });
-      return true;
-    } catch (e) {
-      console.error('Failed to send shift report email', e);
-      return false;
-    }
-  }
 
   async runReport() {
     // 1. Fetch email address from environment
@@ -201,7 +188,7 @@ export class ShiftReportService {
     const body = L.join('\n');
     const subject = `[VYNORA] 8-Hour Shift Report — ${shiftLabel}`;
     
-    await this.sendEmail(reportEmail, subject, body);
+    await mailerService.sendEmail(reportEmail, subject, body);
 
     return {
       status: 'success',

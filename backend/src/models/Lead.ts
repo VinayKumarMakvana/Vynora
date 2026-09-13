@@ -25,13 +25,13 @@ export interface ILead extends Document {
 
 const leadSchema = new Schema({
   lead_id: { type: String, required: true, unique: true },
-  company_id: { type: String, required: true },
-  contact_id: { type: String, required: true },
-  opportunity_id: { type: String },
-  status: { type: String, required: true, default: 'new' },
-  stage: { type: String, required: true, default: 'new' },
+  company_id: { type: String, required: true, index: true },
+  contact_id: { type: String, required: true, index: true },
+  opportunity_id: { type: String, index: true },
+  status: { type: String, required: true, default: 'new', index: true },
+  stage: { type: String, required: true, default: 'new', index: true },
   qualification_status: { type: String },
-  outreach_eligible: { type: Boolean, default: false },
+  outreach_eligible: { type: Boolean, default: false, index: true },
   bdm_owner: { type: String },
   last_contact_date: { type: Date },
   next_followup_date: { type: Date },
@@ -40,9 +40,11 @@ const leadSchema = new Schema({
   company: { type: String },
   domain: { type: String },
   category: { type: String },
-  dedupe_key: { type: String },
+  dedupe_key: { type: String, index: true },
   lead_source: { type: String },
   source: { type: String }
 }, { timestamps: true });
+
+leadSchema.index({ status: 1, outreach_eligible: 1 }); // Compound index for outboundMachine
 
 export const Lead = mongoose.model<ILead>('Lead', leadSchema);

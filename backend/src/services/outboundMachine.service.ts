@@ -97,19 +97,16 @@ export const outboundMachineService = {
       // Pick up to remaining budget
       const targetLeads = sortedLeads.slice(0, remaining_budget);
       
-      if (targetLeads.length < 25) {
-        console.log(`Holding outreach: Only ${targetLeads.length} leads eligible. Minimum 25 required per shift.`);
-        await Log.create({
-          execution_id, workflow, entity_id: 'MIN-CAP',
-          action: `Outreach held: Found only ${targetLeads.length} eligible leads, minimum required is 25 per shift.`,
-          result: 'Skipped', severity: 'Info', human_approval: false
-        } as any);
-        return { success: true, message: 'Minimum 25 leads not met' };
-      }
+      // Minimum cap removed: send immediately to avoid stalling and user frustration
 
       // 3. Process Selected Leads
-      for (const lead of targetLeads) {
-        const company = await Company.findOne({ company_id: lead.company_id });
+      const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+      const transporter = nodemailer.createTransport({
+        service: 'gmail', auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
+      });
+      try {
+        for (const lead of targetLeads) {
+          const company = await Company.findOne({ company_id: lead.company_id });
         const contact = await Contact.findOne({ contact_id: lead.contact_id });
         const research = await Research.findOne({ lead_id: lead.lead_id });
         const email = contact ? String(contact.email || '').toLowerCase().trim() : '';
@@ -163,12 +160,15 @@ Evidence/Context: ${evidence}
 Make the email feel specific and human. Return JSON {subject, body}.`;
 
         const aiResult = await aiGatewayService.processAiRequest({ prompt, system_prompt, temperature: 0.7, max_tokens: 350 });
+        await delay(1500); // Prevent AI rate limit
         
         if (aiResult.success) {
           let subject = ''; let body = '';
           try {
-            let cleanedText = aiResult.text.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
-            const p = JSON.parse(cleanedText);
+            let text = aiResult.text.trim();
+            const start = text.indexOf('{'); const end = text.lastIndexOf('}');
+            if (start !== -1 && end !== -1 && end > start) text = text.slice(start, end + 1);
+            const p = JSON.parse(text);
             subject = p.subject || 'Quick idea';
             body = p.body || p.text || '';
           } catch (e) {
@@ -181,9 +181,6 @@ Make the email feel specific and human. Return JSON {subject, body}.`;
           let sendError = '';
           let status = 'failed';
           try {
-            const transporter = nodemailer.createTransport({
-              service: 'gmail', auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
-            });
             const info = await transporter.sendMail({ from: process.env.GMAIL_USER, to: email, subject, text: body });
             provider_id = info.messageId; // Requires real provider message ID
             status = 'sent';
@@ -218,6 +215,9 @@ Make the email feel specific and human. Return JSON {subject, body}.`;
           await lead.save();
           await Log.create({ execution_id, workflow, entity_id: lead.lead_id, action: 'AI Deferred', result: 'Deferred', error: aiResult.error, severity: 'Medium', human_approval: false });
         }
+        }
+      } finally {
+        transporter.close();
       }
       return { success: true, processed: targetLeads.length };
     } catch (error: any) {

@@ -265,6 +265,12 @@ export class LeadSourcingService {
       const has_contact = contact_key.length > 0;
       const contact_id = has_contact ? `CT-${company_id}-${contact_key.replace(/[^a-z0-9]+/gi, '-')}` : '';
 
+      // ── STRICT EMAIL GATE ──────────────────────────────────────────────────
+      // No email = can't contact = no point saving. Skip immediately.
+      if (!email_found || !syntaxOk || isDisposable) {
+        continue; // Save time, DB space, and AI quota — skip no-email leads entirely
+      }
+
       try {
         await Company.findOneAndUpdate({ company_id }, {
           company_id, name: biz.company, domain, industry: biz.category, country: biz.city, website: biz.website,
@@ -286,7 +292,6 @@ export class LeadSourcingService {
 
       const existingLead = await Lead.findOne({ dedupe_key: biz.lead_dedupe_key });
       if (existingLead) {
-        // await this.logEvent(execution_id, existingLead.lead_id, `Duplicate — lead already exists for ${domain}`, 'Duplicate', 'Low');
         continue;
       }
 

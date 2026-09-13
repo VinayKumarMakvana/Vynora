@@ -37,12 +37,16 @@ export const getNotifications = async (req: Request, res: Response) => {
 export const getStats = async (req: Request, res: Response) => {
   try {
     const totalLeads = await Lead.countDocuments();
-    const verifiedLeads = await Lead.countDocuments({ qualification_status: 'qualified' });
-    const outboundSent = await Message.countDocuments({ direction: 'outbound' });
+    // Case-insensitive match: DB stores 'Qualified' (capital Q)
+    const verifiedLeads = await Lead.countDocuments({ 
+      qualification_status: { $regex: /^qualified$/i },
+      outreach_eligible: true
+    });
+    const outboundSent = await Message.countDocuments({ direction: 'outbound', status: 'sent' });
     const repliesCount = await Message.countDocuments({ direction: 'inbound' });
-    const payments = await Payment.find({ status: { $in: ['completed', 'verified'] } });
+    const payments = await Payment.find({ status: { $regex: /paid/i } });
     const revenue = payments.reduce((acc, curr) => acc + (curr.amount || 0), 0);
-    const pendingRevenue = (await Payment.find({ status: 'pending' })).reduce((a, c) => a + (c.amount || 0), 0);
+    const pendingRevenue = (await Payment.find({ status: { $regex: /pending|requested|held/i } })).reduce((a, c) => a + (c.amount || 0), 0);
 
     // Verify rate
     const verifyRate = totalLeads > 0 ? Math.round((verifiedLeads / totalLeads) * 100) : 0;
@@ -130,7 +134,7 @@ export const getOutreachQueue = async (req: Request, res: Response) => {
   try {
     // Leads in outbound queue (qualified and eligible)
     const queueLeads = await Lead.find({
-      qualification_status: 'qualified',
+      qualification_status: { $regex: /^qualified$/i },
       outreach_eligible: true
     }).sort({ createdAt: -1 }).limit(50);
 
@@ -143,7 +147,7 @@ export const getOutreachQueue = async (req: Request, res: Response) => {
 export const purgeOutreachQueue = async (req: Request, res: Response) => {
   try {
     await Lead.updateMany(
-      { qualification_status: 'qualified', outreach_eligible: true },
+      { qualification_status: { $regex: /^qualified$/i }, outreach_eligible: true },
       { $set: { outreach_eligible: false, status: 'purged' } }
     );
     res.json({ success: true, message: 'Queue purged' });
@@ -166,8 +170,8 @@ export const getInboxMessages = async (req: Request, res: Response) => {
 export const getFinance = async (req: Request, res: Response) => {
   try {
     const payments = await Payment.find().sort({ createdAt: -1 }).limit(100);
-    const completed = payments.filter(p => ['completed', 'verified'].includes(p.status));
-    const pending = payments.filter(p => p.status === 'pending');
+    const completed = payments.filter(p => /paid/i.test(p.status));
+    const pending = payments.filter(p => /pending|requested|held/i.test(p.status));
     const totalRevenue = completed.reduce((a, c) => a + (c.amount || 0), 0);
     const pendingRevenue = pending.reduce((a, c) => a + (c.amount || 0), 0);
 

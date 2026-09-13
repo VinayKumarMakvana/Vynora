@@ -1,5 +1,5 @@
 import axios from 'axios';
-import nodemailer from 'nodemailer';
+import { mailerService } from './mailer.service';
 import { Config } from '../models/Config';
 import { Log } from '../models/Log';
 import { Lead } from '../models/Lead';
@@ -42,19 +42,6 @@ export class ClosingEngineService {
     await Log.create({
       execution_id, workflow: 'VYNORA-W14-Closing-Engine', entity_id, action, result, severity, error, human_approval, log_time: new Date()
     } as any);
-  }
-
-  private async sendEmail(to: string, subject: string, text: string) {
-    try {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
-      });
-      const info = await transporter.sendMail({ from: process.env.GMAIL_USER, to, subject, text });
-      return { success: true, messageId: info.messageId };
-    } catch (e: any) {
-      return { success: false, error: e.message };
-    }
   }
 
   async processCloseDeal(payload: CloseDealPayload) {
@@ -130,7 +117,7 @@ export class ClosingEngineService {
         await this.logEvent(execution_id, opportunity_id, `Deal Closed Won (${evidence}); upfront payment requested from W04 at ${cfg.currency} ${price}`, 'Closed Won', 'Low');
         return { status: 'closed_won', opportunity_id, final_price: price, upfront_requested: true };
       } catch (e: any) {
-        await this.sendEmail(cfg.approval_email, `[VYNORA] Deal Won but payment handoff failed — ${opportunity_id}`, `The deal was correctly marked Closed Won, but the upfront payment request could not be handed to W04 Finance. No payment has been requested yet.\n\nOpportunity: ${opportunity_id}\nFinal price: ${cfg.currency} ${price}\n\nPlease re-send a payment_request (stage=upfront) to W04, or retry this close.`);
+        await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Deal Won but payment handoff failed — ${opportunity_id}`, `The deal was correctly marked Closed Won, but the upfront payment request could not be handed to W04 Finance. No payment has been requested yet.\n\nOpportunity: ${opportunity_id}\nFinal price: ${cfg.currency} ${price}\n\nPlease re-send a payment_request (stage=upfront) to W04, or retry this close.`);
         await this.logEvent(execution_id, opportunity_id, 'Deal Closed Won but W04 payment handoff failed — upfront payment NOT requested; safe to retry', 'Handoff Failed', 'High', 'Finance webhook call failed', true);
         return { status: 'closed_won_payment_pending', reason: 'finance_handoff_failed', opportunity_id };
       }
@@ -143,7 +130,7 @@ export class ClosingEngineService {
         status: 'Pending'
       } as any, { upsert: true });
 
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Confirm deal before Closed Won — ${company?.name || 'unknown'} (${opportunity_id})`, `An acceptance signal arrived but it is NOT a verifiable artifact, so the deal was NOT auto-closed. Please confirm the win.\n\nReason: ${reason}\nCompany: ${company?.name}\nOpportunity: ${opportunity_id}\nProposal price: ${cfg.currency} ${price}\nEvidence: ${evidence} (${evidence_class})\nSource: ${source}\n\nProspect message:\n${message}\n\nOnce confirmed (signed contract / verified deposit), re-send the close-deal request with acceptance_evidence=signed_contract to close and request the upfront payment.`);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Confirm deal before Closed Won — ${company?.name || 'unknown'} (${opportunity_id})`, `An acceptance signal arrived but it is NOT a verifiable artifact, so the deal was NOT auto-closed. Please confirm the win.\n\nReason: ${reason}\nCompany: ${company?.name}\nOpportunity: ${opportunity_id}\nProposal price: ${cfg.currency} ${price}\nEvidence: ${evidence} (${evidence_class})\nSource: ${source}\n\nProspect message:\n${message}\n\nOnce confirmed (signed contract / verified deposit), re-send the close-deal request with acceptance_evidence=signed_contract to close and request the upfront payment.`);
       
       await Opportunity.findOneAndUpdate({ opportunity_id }, { stage: 'Closing', contract_status: 'Pending Confirmation' } as any);
       await this.logEvent(execution_id, opportunity_id, `Close escalated to human confirmation: ${reason}`, 'Pending Confirmation', 'Medium', '', true);
@@ -152,7 +139,7 @@ export class ClosingEngineService {
       await this.logEvent(execution_id, opportunity_id, 'Duplicate close ignored — opportunity already Closed Won (no reopen, accepted_at preserved)', 'Skipped', 'Low');
       return { status: 'already_closed', opportunity_id };
     } else if (route === 'missing_context') {
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Close blocked — context not found (${opportunity_id})`, `A close-deal request could not be processed because the opportunity or its sent proposal was not found.\n\nOpportunity: ${opportunity_id}\nOpportunity found: ${opp_ok}\nProposal found: ${prop_ok}\n\nNothing was closed.`);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Close blocked — context not found (${opportunity_id})`, `A close-deal request could not be processed because the opportunity or its sent proposal was not found.\n\nOpportunity: ${opportunity_id}\nOpportunity found: ${opp_ok}\nProposal found: ${prop_ok}\n\nNothing was closed.`);
       await this.logEvent(execution_id, opportunity_id, 'Close request could not be processed — opportunity/proposal not found', 'Missing Context', 'Medium', '', true);
       return { status: 'error', reason: 'missing_context', opportunity_id };
     } else if (route === 'invalid') {

@@ -1,7 +1,7 @@
 import axios from 'axios';
-import nodemailer from 'nodemailer';
 import { Config } from '../models/Config';
 import { Log } from '../models/Log';
+import { mailerService } from './mailer.service';
 
 export interface AiGatewayPayload {
   prompt?: string;
@@ -98,18 +98,10 @@ async function handleAllKeysExhausted(totalKeys: number) {
   if (!recipient) return;
 
   try {
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.GMAIL_USER,
-        pass: process.env.GMAIL_PASS
-      }
-    });
-    await transporter.sendMail({
-      from: process.env.GMAIL_USER,
-      to: recipient,
-      subject: `⚠️ VYNORA ALERT: ALL ${totalKeys} Gemini API Keys Exhausted`,
-      text: [
+    await mailerService.sendEmail(
+      recipient,
+      `⚠️ VYNORA ALERT: ALL ${totalKeys} Gemini API Keys Exhausted`,
+      [
         `VYNORA AI Gateway: All ${totalKeys} Gemini API keys have hit their quota limit.`,
         ``,
         `The engine has automatically reset to Key 1 and will retry on the next cycle.`,
@@ -123,7 +115,7 @@ async function handleAllKeysExhausted(totalKeys: number) {
         ``,
         `This alert will not repeat for 1 hour.`
       ].join('\n')
-    });
+    );
   } catch (err) {
     console.error('[AI-GATEWAY] Failed to send all-keys-exhausted alert:', err);
   }

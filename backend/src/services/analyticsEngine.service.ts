@@ -1,5 +1,5 @@
-import nodemailer from 'nodemailer';
 import { Config } from '../models/Config';
+import { mailerService } from './mailer.service';
 import { Payment } from '../models/Payment';
 import { Opportunity } from '../models/Opportunity';
 import { Lead } from '../models/Lead';
@@ -30,19 +30,6 @@ export class AnalyticsEngineService {
     };
   }
 
-  private async sendEmail(to: string, subject: string, text: string) {
-    try {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
-      });
-      await transporter.sendMail({ from: process.env.GMAIL_USER, to, subject, text });
-      return true;
-    } catch (e) {
-      console.error('Failed to send analytics email', e);
-      return false;
-    }
-  }
 
   async runAnalytics() {
     const cfg = await this.getConfig();
@@ -53,24 +40,25 @@ export class AnalyticsEngineService {
     const monthStart = Date.UTC(y, m, 1);
     const monthEnd = Date.UTC(y, m + 1, 1);
 
-    const payments = await Payment.find();
-    let closedRevenue = 0;
-    let receivedCount = 0;
-    const RECEIVED = ['upfront paid', 'final paid', 'paid', 'verified', 'received', 'completed'];
-
-    for (const p of payments) {
-      const st = (p.status || '').toLowerCase().trim();
-      if (!RECEIVED.includes(st)) continue;
-      
-      const t = new Date((p as any).createdAt).getTime();
-      if (t >= monthStart && t < monthEnd) {
-        const amt = Number(p.amount);
-        if (!isNaN(amt) && amt > 0) {
-          closedRevenue += amt;
-          receivedCount++;
+    const RECEIVED_REGEX = /upfront paid|final paid|paid|verified|received|completed/i;
+    const paymentAgg = await Payment.aggregate([
+      { 
+        $match: {
+          status: { $regex: RECEIVED_REGEX },
+          createdAt: { $gte: new Date(monthStart), $lt: new Date(monthEnd) }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: "$amount" },
+          count: { $sum: 1 }
         }
       }
-    }
+    ]);
+
+    let closedRevenue = paymentAgg.length > 0 ? paymentAgg[0].totalRevenue || 0 : 0;
+    let receivedCount = paymentAgg.length > 0 ? paymentAgg[0].count || 0 : 0;
     closedRevenue = Math.round(closedRevenue * 100) / 100;
 
     const costsUnset = cfg.cost_fixed_monthly === 0 && cfg.cost_variable_percent === 0;
@@ -135,12 +123,8 @@ export class AnalyticsEngineService {
     let avgDeal = wonCount > 0 && wonValueSum > 0 ? wonValueSum / wonCount : (cfg.price_min + cfg.price_max) / 2;
     avgDeal = Math.round(avgDeal * 100) / 100;
 
-    const leads = await Lead.find();
-    let openLeads = 0;
-    for (const l of leads) {
-      const s = String(l.status || '').toLowerCase();
-      if (!s.includes('won') && !s.includes('lost') && !s.includes('suppress')) openLeads++;
-    }
+    const IGNORED_REGEX = /won|lost|suppress/i;
+    let openLeads = await Lead.countDocuments({ status: { $not: IGNORED_REGEX } });
 
     const targetGap = Math.round((cfg.revenue_target_monthly - closedRevenue) * 100) / 100;
     const effConv = conversionRate > 0 ? conversionRate : cfg.conversion_opp_to_won;
@@ -229,7 +213,7 @@ Directive: ${directive}
 ${directiveNote}
 
 — VYNORA Autonomous BDM`;
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Revenue behind target — ${period} ($${closedRevenue}/${cfg.revenue_target_monthly})`, msg);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Revenue behind target — ${period} ($${closedRevenue}/${cfg.revenue_target_monthly})`, msg);
     }
 
     return {

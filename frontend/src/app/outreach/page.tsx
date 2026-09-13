@@ -84,12 +84,12 @@ export default function OutreachPage() {
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="grid gap-6 md:grid-cols-3 flex-1">
               <Card className="md:col-span-2 flex flex-col">
                 <CardHeader className="border-b border-gray-800 bg-gray-900/50">
-                  <div className="flex justify-between items-center">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <CardTitle className="text-gray-100">Next Dispatch Batch</CardTitle>
                       <CardDescription>High-fit leads queued for the next 30-min control cycle.</CardDescription>
                     </div>
-                    <Button variant="outline" className="gap-2" onClick={() => dashboardAPI.forceRunSourcing()}>
+                    <Button variant="outline" className="gap-2 w-full sm:w-auto justify-center" onClick={() => dashboardAPI.forceRunSourcing()}>
                       <PlayCircle className="h-4 w-4" /> Dispatch Now
                     </Button>
                   </div>
@@ -180,8 +180,8 @@ export default function OutreachPage() {
 
           {/* Inbox Tab */}
           {activeTab === 'inbox' && (
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex-1 bg-[#0a0a0a] border border-gray-800 rounded-xl flex overflow-hidden min-h-[500px]">
-              <div className="w-1/3 border-r border-gray-800 flex flex-col">
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex-1 bg-[#0a0a0a] border border-gray-800 rounded-xl flex flex-col md:flex-row overflow-hidden min-h-[500px]">
+              <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r border-gray-800 flex flex-col max-h-[300px] md:max-h-none">
                 <div className="p-4 border-b border-gray-800 bg-gray-900/50">
                   <h3 className="font-semibold text-gray-100 flex items-center gap-2">
                     <Inbox className="h-4 w-4 text-indigo-400" /> Recent Replies

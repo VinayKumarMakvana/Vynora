@@ -16,15 +16,15 @@ export interface IOpportunity extends Document {
 
 const opportunitySchema = new Schema({
   opportunity_id: { type: String, required: true, unique: true },
-  lead_id: { type: String, required: true },
+  lead_id: { type: String, required: true, index: true },
   service: { type: String, required: true },
-  stage: { type: String, required: true },
+  stage: { type: String, required: true, index: true },
   bdm: { type: String },
   discovery_date: { type: Date },
   scope_status: { type: String, default: 'Not Started' },
   proposal_status: { type: String, default: 'Not Started' },
-  contract_status: { type: String, default: 'Not Started' },
-  payment_status: { type: String, default: 'None' },
+  contract_status: { type: String, default: 'Not Started', index: true },
+  payment_status: { type: String, default: 'None', index: true },
   final_price: { type: Number }
 }, { timestamps: true });
 

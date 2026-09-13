@@ -11,7 +11,7 @@ import { Service } from '../models/Service';
 import { Approval } from '../models/Approval';
 import { Log } from '../models/Log';
 import { aiGatewayService } from './aiGateway.service';
-import nodemailer from 'nodemailer';
+import { mailerService } from './mailer.service';
 
 export class ProposalService {
   private async getConfig() {
@@ -45,19 +45,6 @@ export class ProposalService {
     } as any);
   }
 
-  private async sendEmail(to: string, subject: string, text: string, html?: string) {
-    try {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
-      });
-      const info = await transporter.sendMail({ from: process.env.GMAIL_USER, to, subject, text, html });
-      return { success: true, messageId: info.messageId };
-    } catch (e: any) {
-      console.error('Email send failed:', e.message);
-      return { success: false, error: e.message };
-    }
-  }
 
   async handleProposalIntake(body: any) {
     const cfg = await this.getConfig();
@@ -142,7 +129,7 @@ export class ProposalService {
 
     if (pre_route === 'missing_context') {
       const msg = `A proposal request could not be processed because the opportunity was not found in the CRM.\nOpportunity: ${ctx.opportunity_id}\nLead: ${ctx.lead_id}\nContact: ${ctx.contact_name} <${ctx.prospect_email}>\nNo scoping, pricing or proposal was generated.`;
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Proposal blocked — missing CRM context (${ctx.opportunity_id})`, msg);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Proposal blocked — missing CRM context (${ctx.opportunity_id})`, msg);
       await this.logEvent(ctx.opportunity_id, 'Proposal request could not be processed — opportunity not found in CRM', 'Missing Context', 'Medium', true);
       return { status: 'error', reason: 'missing_context' };
     }
@@ -201,7 +188,7 @@ export class ProposalService {
       await Opportunity.findOneAndUpdate({ opportunity_id }, { scope_status: 'Needs Clarification', proposal_status: 'Pending', discovery_date: new Date() } as any);
       
       const msg = `Requirements were extracted but critical information is missing before this can be priced or proposed. No pricing or proposal was generated.\n\nProspect: ${ctx.contact_name} <${ctx.prospect_email}>\nService: ${ctx.service_name}\n\nMissing: ${missing_arr.join('; ')}\n\nScope so far: ${sa(r.scope)}\nFeatures: ${sa(r.features)}`;
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Scope needs clarification — ${ctx.company_name} (${ctx.opportunity_id})`, msg);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Scope needs clarification — ${ctx.company_name} (${ctx.opportunity_id})`, msg);
       
       await this.logEvent(ctx.opportunity_id, `Requirements scoped but critical info missing: ${missing_arr.join('; ')} — routed to human, no pricing/proposal`, 'Needs Clarification', 'Medium', true);
       return { status: 'needs_clarification' };
@@ -265,7 +252,7 @@ export class ProposalService {
       } as any);
 
       const msg = `A proposal is scoped and priced but requires human approval before it is sent to the prospect. The prospect has NOT been emailed.\n\nProspect: ${ctx.contact_name} <${ctx.prospect_email}>\nOpportunity: ${ctx.opportunity_id}\nService: ${ctx.service_name}\nPrice: ${cfg.currency} ${price} (${price_tier})\nTerms: ${payment_terms}\n\nWhy approval is required: ${approval_reason}\n\nScope: ${sa(r.scope)}\nDeliverables: ${sa(r.features)}\nTimeline: ${sa(r.timeline)}\n\nApproval record: APR-${ctx.proposal_id} (set status to approved/rejected in vynora_approvals).`;
-      await this.sendEmail(cfg.approval_email, `[VYNORA] Proposal needs approval — ${ctx.company_name} (${cfg.currency} ${price})`, msg);
+      await mailerService.sendEmail(cfg.approval_email, `[VYNORA] Proposal needs approval — ${ctx.company_name} (${cfg.currency} ${price})`, msg);
       
       await this.logEvent(ctx.proposal_id, `Proposal priced ${cfg.currency} ${price} — held for human approval: ${approval_reason}; prospect NOT emailed`, 'Pending Approval', 'Medium', true);
       return { status: 'pending_approval' };
@@ -281,8 +268,8 @@ export class ProposalService {
       `Scope: ${sa(r.scope)}`, `Deliverables/features: ${sa(r.features)}`,
       `Integrations: ${sa(r.integrations)}`, `Platform: ${sa(r.platform)}`, `Technology: ${sa(r.technology)}`,
       `Users: ${sa(r.users)}`, `Timeline: ${sa(r.timeline) || 'to be confirmed'}`,
-      `Investment: ${cfg.currency} ${price} total. Payment terms: ${payment_terms}`,
-      'Structure: restate their problem, present the solution, list the concrete deliverables provided above (do not add new ones), state the investment and payment terms exactly as given, and end with a clear call to action to approve and kick off. Keep it under 300 words.'
+      `Investment: ${cfg.currency} ${price} total. Payment terms: ${payment_terms}. Accepted payment methods: Binance (Preferred) and PayPal.`,
+      'Structure: restate their problem, present the solution, list the concrete deliverables provided above (do not add new ones), state the investment, payment terms, and accepted payment methods exactly as given, and end with a clear call to action to approve and kick off. Keep it under 300 words.'
     ];
 
     const draftRes = await aiGatewayService.processAiRequest({ prompt: emailLines.join(NL), system_prompt: emailSys, temperature: 0.4, max_tokens: 1500 });
@@ -305,7 +292,7 @@ export class ProposalService {
     }
 
     // Send Proposal Email
-    const sendResult = await this.sendEmail(ctx.prospect_email, subject, '', body_html);
+    const sendResult = await mailerService.sendEmail(ctx.prospect_email, subject, '', body_html);
     const idempotency = `PROP-OUT-${ctx.opportunity_id}`;
 
     if (sendResult.success) {
