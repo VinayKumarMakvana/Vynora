@@ -89,18 +89,38 @@ export class LeadSourcingService {
     const ql = `[out:json][timeout:90];\narea["name"="${area}"]->.searchArea;\n(\n${clauses.join('\n')}\n);\nout tags center ${cap * 3};`;
 
     let elements = [];
-    try {
-      const payload = 'data=' + encodeURIComponent(ql);
-      const res = await axios.post('https://overpass-api.de/api/interpreter', payload, { 
-        headers: { 
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'VynoraAIAgency/1.0 (vinaytailor8432@gmail.com)'
-        }, 
-        timeout: 100000 
-      });
-      if (res.data && Array.isArray(res.data.elements)) elements = res.data.elements;
-    } catch (e: any) {
-      await this.logEvent(execution_id, 'none', `Overpass API failed: ${e.message}`, 'Failed', 'High');
+    const endpoints = [
+      'https://overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
+      'https://maps.mail.ru/osm/tools/overpass/api/interpreter'
+    ];
+
+    let success = false;
+    let lastError = '';
+
+    for (const url of endpoints) {
+      try {
+        const payload = 'data=' + encodeURIComponent(ql);
+        const res = await axios.post(url, payload, { 
+          headers: { 
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': 'VynoraAIAgency/1.0 (vinaytailor8432@gmail.com)'
+          }, 
+          timeout: 45000 
+        });
+        if (res.data && Array.isArray(res.data.elements)) {
+          elements = res.data.elements;
+          success = true;
+          break; // Success! Exit the fallback loop.
+        }
+      } catch (e: any) {
+        lastError = e.message;
+        console.warn(`Overpass API timeout/error on ${url}: ${e.message}. Trying next mirror...`);
+      }
+    }
+
+    if (!success) {
+      await this.logEvent(execution_id, 'none', `Overpass API failed on all endpoints. Last error: ${lastError}`, 'Failed', 'High');
       return { status: 'error', message: 'Overpass API request failed' };
     }
 
