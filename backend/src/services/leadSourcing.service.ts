@@ -140,11 +140,12 @@ export class LeadSourcingService {
       const freeidxUrl = `https://www.freeindex.co.uk/search.htm?q=${encodeURIComponent(keywords)}&l=${encodeURIComponent(area)}`;
       
       let fallbackHtml = '';
-      for (const dirUrl of [yellUrl, freeidxUrl]) {
+      const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(keywords + ' in ' + area)}`;
+      for (const dirUrl of [yellUrl, freeidxUrl, ddgUrl]) {
         try {
           const r = await axios.get(dirUrl, { 
             timeout: 30000, 
-            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; VynoraBot/1.0)' },
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
             httpsAgent: ipv4Agent 
           });
           if (typeof r.data === 'string' && r.data.length > 500) {
@@ -158,7 +159,7 @@ export class LeadSourcingService {
 
       // Parse business websites from directory HTML
       if (fallbackHtml.length > 0) {
-        const websiteMatches = fallbackHtml.match(/https?:\/\/(?!www\.yell|www\.freeindex)[a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s"'<>]*)?/gi) || [];
+        const websiteMatches = fallbackHtml.match(/https?:\/\/(?!www\.yell|www\.freeindex|duckduckgo|google)[a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s"'<>]*)?/gi) || [];
         const uniqueUrls = [...new Set(websiteMatches)].slice(0, cap);
         for (const url of uniqueUrls) {
           const domain = this.domainFromUrl(url);
