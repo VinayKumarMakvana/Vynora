@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Mail, MessageSquare, DollarSign, ArrowUpRight, Target, Activity, RefreshCw } from "lucide-react";
+import { Users, Mail, MessageSquare, DollarSign, Target, Activity, RefreshCw, Clock } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { dashboardAPI } from "@/lib/api";
 
@@ -29,16 +29,21 @@ export default function Home() {
   const [activeStat, setActiveStat] = useState<number | null>(null);
   const [statsData, setStatsData] = useState<any>(null);
   const [feedLogs, setFeedLogs] = useState<any[]>([]);
+  const [shiftStats, setShiftStats] = useState<any>(null);
+  const [countdown, setCountdown] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [stats, feed] = await Promise.all([
+      const [stats, feed, shift] = await Promise.all([
         dashboardAPI.getStats(),
-        dashboardAPI.getFeed()
+        dashboardAPI.getFeed(),
+        dashboardAPI.getShiftStats(),
       ]);
       setStatsData(stats || {});
       setFeedLogs(Array.isArray(feed) ? feed : []);
+      setShiftStats(shift || {});
+      setCountdown(shift?.msToNextShift || 0);
     } catch (e) {
       console.error(e);
     } finally {
@@ -51,6 +56,20 @@ export default function Home() {
     const interval = setInterval(fetchAll, 30000);
     return () => clearInterval(interval);
   }, [fetchAll]);
+
+  // Live countdown
+  useEffect(() => {
+    const t = setInterval(() => setCountdown(c => Math.max(0, c - 1000)), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  function formatMs(ms: number) {
+    if (ms <= 0) return '00:00:00';
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    const s = Math.floor((ms % 60000) / 1000);
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
 
   const statCards = statsData ? [
     {
@@ -109,6 +128,11 @@ export default function Home() {
 
   const sendPercent = statsData ? Math.min(100, Math.round((statsData.sentToday / (statsData.dailyCap || 1)) * 100)) : 0;
   const qualityRate = statsData ? statsData.verifyRate : 0;
+  const shiftSent = shiftStats?.sentThisShift || 0;
+  const shiftLimit = shiftStats?.shiftLimit || 25;
+  const shiftPercent = Math.min(100, Math.round((shiftSent / shiftLimit) * 100));
+  const shiftNames = ['Shift 1 (00:00–08:00 IST)', 'Shift 2 (08:00–16:00 IST)', 'Shift 3 (16:00–00:00 IST)'];
+  const currentShift = shiftNames[shiftStats?.currentShiftIdx ?? 0] || 'Shift 1';
 
   // Latest opportunities from logs (role: follow-up)
   const followupLogs = feedLogs.filter((l: any) => 
@@ -222,34 +246,47 @@ export default function Home() {
               Active Goals
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-6 pt-6">
+          <CardContent className="space-y-5 pt-6">
+            {/* Daily */}
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-400 font-medium">
-                  Daily Send Limit ({statsData?.sentToday || 0}/{statsData?.dailyCap || 25})
-                </span>
+                <span className="text-gray-400 font-medium">Daily Send ({statsData?.sentToday || 0}/{statsData?.dailyCap || 75})</span>
                 <span className="text-gray-100 font-bold">{sendPercent}%</span>
               </div>
               <div className="h-2 w-full bg-gray-800 rounded-full overflow-hidden">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${sendPercent}%` }}
-                  transition={{ duration: 1, ease: "easeOut" }}
+                <motion.div initial={{ width: 0 }} animate={{ width: `${sendPercent}%` }} transition={{ duration: 1, ease: "easeOut" }}
                   className={`h-full ${sendPercent > 80 ? 'bg-red-500' : sendPercent > 50 ? 'bg-amber-500' : 'bg-indigo-500'}`}
                 />
               </div>
             </div>
 
+            {/* This Shift with live countdown */}
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-400 font-medium">Quality Rate (Verified/Sourced)</span>
+                <span className="text-gray-400 font-medium">This Shift ({shiftSent}/{shiftLimit})</span>
+                <span className="text-gray-100 font-bold">{shiftPercent}%</span>
+              </div>
+              <div className="h-2 w-full bg-gray-800 rounded-full overflow-hidden">
+                <motion.div initial={{ width: 0 }} animate={{ width: `${shiftPercent}%` }} transition={{ duration: 1, ease: "easeOut" }}
+                  className={`h-full ${shiftPercent > 80 ? 'bg-red-500' : shiftPercent > 50 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-600">{currentShift}</p>
+                <p className="text-xs text-amber-400 flex items-center gap-1">
+                  <Clock className="h-3 w-3" /> Next: <span className="font-mono">{formatMs(countdown)}</span>
+                </p>
+              </div>
+            </div>
+
+            {/* Quality */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-400 font-medium">Lead Quality Rate</span>
                 <span className="text-gray-100 font-bold">{qualityRate}%</span>
               </div>
               <div className="h-2 w-full bg-gray-800 rounded-full overflow-hidden">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${qualityRate}%` }}
-                  transition={{ duration: 1, ease: "easeOut" }}
+                <motion.div initial={{ width: 0 }} animate={{ width: `${qualityRate}%` }} transition={{ duration: 1, ease: "easeOut" }}
                   className="h-full bg-emerald-500"
                 />
               </div>

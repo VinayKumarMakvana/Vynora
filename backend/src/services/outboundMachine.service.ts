@@ -33,8 +33,8 @@ export const outboundMachineService = {
       } catch (e) {}
       if (!waitDays.length) waitDays = [3, 4, 5];
 
-      const shift_first_touch_cap = num('shift_first_touch_cap', 50); // Max 50 per shift
-      const day_first_touch_cap = num('day_first_touch_cap', 150);
+      const day_first_touch_cap = num('outbound_day_limit', num('day_first_touch_cap', 75));
+      const shift_first_touch_cap = Math.ceil(day_first_touch_cap / 3); // Automatically split into 3 shifts
 
       const SHIFT_HOURS = 8;
       const now = new Date();
@@ -42,7 +42,14 @@ export const outboundMachineService = {
       const istShiftStartMs = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate(), Math.floor(istNow.getUTCHours() / SHIFT_HOURS) * SHIFT_HOURS, 0, 0, 0) - (330 * 60000);
       const istDayStartMs = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate(), 0, 0, 0, 0) - (330 * 60000);
 
-      const sentMessages = await Message.find({ direction: 'outbound', status: 'sent' });
+      // Only fetch messages sent TODAY (from day start onwards) to correctly compute the cap.
+      // Fetching ALL messages would incorrectly count yesterday's quota against today!
+      const todayStart = new Date(istDayStartMs);
+      const sentMessages = await Message.find({
+        direction: 'outbound',
+        status: 'sent',
+        sent_at: { $gte: todayStart }
+      });
       let shift_first_touch_sent = 0;
       let day_first_touch_sent = 0;
 
@@ -56,6 +63,8 @@ export const outboundMachineService = {
           if (t >= istDayStartMs) day_first_touch_sent++;
         }
       });
+
+      console.log(`[Budget] Shift: ${shift_first_touch_sent}/${shift_first_touch_cap} | Day: ${day_first_touch_sent}/${day_first_touch_cap}`);
 
       const remaining_shift = Math.max(0, shift_first_touch_cap - shift_first_touch_sent);
       const remaining_day = Math.max(0, day_first_touch_cap - day_first_touch_sent);
@@ -94,8 +103,8 @@ export const outboundMachineService = {
         return (sB?.total_score || 0) - (sA?.total_score || 0);
       });
 
-      // Pick up to remaining budget
-      const targetLeads = sortedLeads.slice(0, remaining_budget);
+      // Process exactly 1 lead per cycle to spread them out naturally (1 email every 5 minutes = human speed)
+      const targetLeads = sortedLeads.slice(0, 1);
       
       // Minimum cap removed: send immediately to avoid stalling and user frustration
 
@@ -147,19 +156,61 @@ export const outboundMachineService = {
         }
 
         // OUTREACH HANDOFF CONTRACT
-        const likely_pain_point = research?.likely_pain_point || 'manual processes';
-        const relevant_service = research?.relevant_service || 'website redesign';
-        const evidence = research?.evidence || 'general digital improvement needed';
+        const likely_pain_point = research?.likely_pain_point || 'outdated digital processes';
+        const relevant_service = research?.relevant_service || 'website redesign and digital automation';
+        const evidence = research?.evidence || 'general digital improvement opportunity identified';
+        const companyCity = company?.country || 'your area';
+        const companyIndustry = company?.industry || 'your industry';
         
-        const system_prompt = 'You are a consultative B2B writer for VYNORA. You write hyper-personalized, concise emails identifying specific digital pain points. Focus strictly on relevance, do not promise guaranteed ROI, do not use generic mass-mail language, and end with a simple CTA. Return ONLY a strict JSON object with {"subject": "...", "body": "..."} without markdown formatting.';
-        const prompt = `Write an outreach email for ${company?.name}.
-Industry: ${company?.industry}
-Identified Pain Point: ${likely_pain_point}
-Relevant Vynora Solution: ${relevant_service}
-Evidence/Context: ${evidence}
-Make the email feel specific and human. Return JSON {subject, body}.`;
+        const system_prompt = `You are an expert B2B outreach writer for Vynora, a UK-based digital agency. 
+Your job is to write a highly personalised, professional cold email that feels like it was written by a real human consultant — not a bot or a mass mailer.
 
-        const aiResult = await aiGatewayService.processAiRequest({ prompt, system_prompt, temperature: 0.7, max_tokens: 350 });
+Strict rules:
+- Never use generic phrases like "I hope this email finds you well", "touching base", "circle back", or "synergies"
+- Never make up fake statistics. Only use the evidence provided.
+- The email must feel like YOU personally reviewed their website and noticed something specific
+- DO NOT start with "I" — start with the company name or an observation
+- Write in a warm, professional British English tone
+- Return ONLY a valid JSON object with keys "subject" and "body". No markdown. No code blocks.`;
+
+        const prompt = `Write a cold outreach email using the following details.
+
+Company: ${company?.name}
+Industry / Category: ${companyIndustry}
+City / Area: ${companyCity}
+Website: ${company?.website || company?.domain}
+Identified Pain Point: ${likely_pain_point}
+Relevant Vynora Service: ${relevant_service}
+Evidence from their website: ${evidence}
+
+The email must follow this EXACT structure:
+
+1. SUBJECT LINE: Specific and curiosity-driven. Reference their company or pain point. Not clickbait. Max 10 words.
+
+2. OPENING (2-3 sentences): Start with a genuine compliment or observation about what ${company?.name} does well. Then smoothly transition to the specific gap or pain point you noticed on their website or in their industry.
+
+3. PAIN POINT SECTION (3-4 sentences): Describe the pain point clearly — explain WHY it is costing them clients or money. Use the evidence provided. Make it feel real and specific to THEM, not generic.
+
+4. SOLUTION SECTION (3-4 bullet points with emojis): Show exactly how Vynora solves this:
+   - One bullet per benefit
+   - Each bullet starts with a relevant emoji
+   - Focus on outcomes (more enquiries, saved time, higher conversion) not features
+
+5. SOCIAL PROOF (2 sentences): Mention a result we achieved for a similar ${companyIndustry} business. You can say "a similar business in the UK" — do not make up a specific company name.
+
+6. CTA (2-3 sentences): Offer a FREE 15-minute website audit. Make it low-pressure. Ask for a reply or a quick call.
+
+7. SIGNATURE (exact format, do not change):
+Warm regards,
+Vinay
+Founder, Vynora Digital Agency
+🌐 Visit us: https://vynorapvt-one.vercel.app
+
+P.S. — If you're already working with someone on your digital presence, no worries at all. But if results aren't where you'd like them to be, I'm happy to offer a free second opinion.
+
+Return ONLY a JSON object: {"subject": "...", "body": "..."}`;
+
+        const aiResult = await aiGatewayService.processAiRequest({ prompt, system_prompt, temperature: 0.75, max_tokens: 700 });
         await delay(4500); // 4.5 seconds delay to perfectly respect Gemini's strict 15 RPM free-tier limit
         
         if (aiResult.success) {

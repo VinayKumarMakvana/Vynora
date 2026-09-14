@@ -40,20 +40,21 @@ async function startWorker() {
         console.error('Follow-up Error (Ignored):', e.message);
       }
 
-      // 3. SMART SOURCING
+      // 3. SMART SOURCING — triggers when fresh/eligible queue is low
       console.log('[3/4] Checking Lead Queue...');
       const pendingLeads = await Lead.countDocuments({ status: 'new', outreach_eligible: true });
-      console.log(`Currently ${pendingLeads} verified leads sitting in queue waiting for outreach.`);
+      const contactedToday = await Lead.countDocuments({ status: 'contacted' });
+      console.log(`Queue: ${pendingLeads} eligible | ${contactedToday} already contacted.`);
       
       if (pendingLeads < 25) {
-        console.log(`Queue is low (< 25). Firing up Sourcing Engine...`);
+        console.log(`Queue is low (< 25). Firing up Sourcing Engine to find fresh leads...`);
         try {
           await leadSourcingService.runSourcing(`worker-${Date.now()}`);
         } catch (e: any) {
           console.error('Sourcing Error (Ignored):', e.message);
         }
       } else {
-        console.log(`Queue is healthy. Skipping Sourcing to save AI tokens.`);
+        console.log(`Queue is healthy (${pendingLeads} leads). Skipping Sourcing to save AI tokens.`);
       }
 
       // 4. OUTBOUND MACHINE

@@ -10,7 +10,10 @@ import {
   getOutreachQueue,
   purgeOutreachQueue,
   getInboxMessages,
-  getFinance
+  getFinance,
+  getShiftStats,
+  getDraftReplies,
+  sendDraftReply
 } from '../controllers/dashboard.controller';
 
 const router = Router();
@@ -25,6 +28,9 @@ router.get('/notifications', getNotifications);
 router.get('/outreach/queue', getOutreachQueue);
 router.delete('/outreach/queue', purgeOutreachQueue);
 router.get('/outreach/inbox', getInboxMessages);
+router.get('/outreach/drafts', getDraftReplies);
+router.post('/outreach/drafts/send', sendDraftReply);
+router.get('/shift/stats', getShiftStats);
 router.get('/finance', getFinance);
 
 export default router;

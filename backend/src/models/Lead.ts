@@ -46,5 +46,7 @@ const leadSchema = new Schema({
 }, { timestamps: true });
 
 leadSchema.index({ status: 1, outreach_eligible: 1 }); // Compound index for outboundMachine
+leadSchema.index({ qualification_status: 1, outreach_eligible: 1 });
+leadSchema.index({ createdAt: -1 });
 
 export const Lead = mongoose.model<ILead>('Lead', leadSchema);

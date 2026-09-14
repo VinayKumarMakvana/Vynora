@@ -27,5 +27,6 @@ const logSchema = new Schema({
 }, { timestamps: true });
 
 logSchema.index({ workflow: 1, log_time: -1 });
+logSchema.index({ log_time: -1, createdAt: -1 });
 
 export const Log = mongoose.model<ILog>('Log', logSchema);

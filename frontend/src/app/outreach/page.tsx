@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Send, Clock, PlayCircle, MessageSquare, AlertTriangle, UserCheck, RefreshCw, Inbox } from "lucide-react";
+import { Send, Clock, PlayCircle, MessageSquare, AlertTriangle, UserCheck, RefreshCw, Inbox, Zap, CheckCircle, Edit3, X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { dashboardAPI } from "@/lib/api";
 
@@ -17,35 +17,76 @@ function timeAgo(dateStr: string) {
   return d.toLocaleDateString();
 }
 
+function formatMs(ms: number) {
+  if (ms <= 0) return '00:00:00';
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 export default function OutreachPage() {
-  const [activeTab, setActiveTab] = useState<'queue' | 'inbox'>('queue');
+  const [activeTab, setActiveTab] = useState<'queue' | 'inbox' | 'drafts'>('queue');
   const [queue, setQueue] = useState<any[]>([]);
   const [inbox, setInbox] = useState<any[]>([]);
+  const [drafts, setDrafts] = useState<any[]>([]);
   const [selectedMsg, setSelectedMsg] = useState<any | null>(null);
+  const [selectedDraft, setSelectedDraft] = useState<any | null>(null);
+  const [editingBody, setEditingBody] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<any>(null);
+  const [shiftStats, setShiftStats] = useState<any>(null);
+  const [countdown, setCountdown] = useState(0);
 
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [q, i, s, sh, dr] = await Promise.all([
+        dashboardAPI.getOutreachQueue(),
+        dashboardAPI.getInboxMessages(),
+        dashboardAPI.getStats(),
+        dashboardAPI.getShiftStats(),
+        dashboardAPI.getDraftReplies(),
+      ]);
+      setQueue(q || []);
+      setInbox(i || []);
+      setStats(s);
+      setShiftStats(sh);
+      setDrafts(dr || []);
+      setCountdown(sh?.msToNextShift || 0);
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Live countdown timer
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const [q, i, s] = await Promise.all([
-          dashboardAPI.getOutreachQueue(),
-          dashboardAPI.getInboxMessages(),
-          dashboardAPI.getStats()
-        ]);
-        setQueue(q || []);
-        setInbox(i || []);
-        setStats(s);
-      } catch (e) { console.error(e); }
-      finally { setLoading(false); }
-    };
-    fetchData();
+    const t = setInterval(() => setCountdown(c => Math.max(0, c - 1000)), 1000);
+    return () => clearInterval(t);
   }, []);
 
   const sentToday = stats?.sentToday || 0;
-  const dailyCap = stats?.dailyCap || 25;
+  const dailyCap = stats?.dailyCap || 75;
   const capPercent = Math.min(100, Math.round((sentToday / dailyCap) * 100));
+  const shiftSent = shiftStats?.sentThisShift || 0;
+  const shiftLimit = shiftStats?.shiftLimit || 25;
+  const shiftPercent = Math.min(100, Math.round((shiftSent / shiftLimit) * 100));
+  const shiftNames = ['Shift 1 (00:00–08:00)', 'Shift 2 (08:00–16:00)', 'Shift 3 (16:00–24:00)'];
+  const currentShift = shiftNames[shiftStats?.currentShiftIdx ?? 0] || 'Shift 1';
+
+  const handleSendDraft = async (draft: any, body?: string) => {
+    setSending(true);
+    try {
+      await dashboardAPI.sendDraftReply({ message_id: draft.message_id, body: body || draft.body, subject: draft.subject });
+      setDrafts(prev => prev.filter(d => d.message_id !== draft.message_id));
+      setSelectedDraft(null);
+      setEditing(false);
+    } catch (e) { console.error(e); }
+    setSending(false);
+  };
 
   return (
     <div className="space-y-6 pb-10 h-full flex flex-col">
@@ -55,22 +96,31 @@ export default function OutreachPage() {
             Outbound & Mailbox
             <Send className="h-5 w-5 text-indigo-400" />
           </h1>
-          <p className="text-gray-400 text-sm">Manage the W01 Outbound Priority Queue and W11 Inbox Replies.</p>
+          <p className="text-gray-400 text-sm">W01 Priority Queue · W11 Inbox · AI Draft Replies</p>
         </div>
-        <div className="flex items-center bg-black/40 p-1 rounded-lg border border-gray-800">
-          <button
-            onClick={() => setActiveTab('queue')}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'queue' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
-          >
-            Priority Queue ({queue.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('inbox')}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'inbox' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
-          >
-            Inbox ({inbox.length})
+        <div className="flex items-center gap-3">
+          {/* Next Shift Countdown */}
+          <div className="flex items-center gap-2 bg-gray-900 border border-gray-700 px-3 py-1.5 rounded-lg text-sm">
+            <Clock className="h-4 w-4 text-amber-400" />
+            <span className="text-gray-400 text-xs">{currentShift} · Next:</span>
+            <span className="text-amber-400 font-mono font-bold">{formatMs(countdown)}</span>
+          </div>
+          <button onClick={fetchData} className="p-2 text-gray-500 hover:text-gray-300 transition-colors">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
+      </div>
+
+      {/* Tab Bar */}
+      <div className="flex items-center bg-black/40 p-1 rounded-lg border border-gray-800 w-fit">
+        {(['queue', 'inbox', 'drafts'] as const).map(tab => (
+          <button key={tab} onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-all capitalize flex items-center gap-2 ${activeTab === tab ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+          >
+            {tab === 'drafts' && <Zap className="h-3.5 w-3.5 text-amber-400" />}
+            {tab === 'queue' ? `Priority Queue (${queue.length})` : tab === 'inbox' ? `Inbox (${inbox.length})` : `AI Drafts (${drafts.length})`}
+          </button>
+        ))}
       </div>
 
       {loading ? (
@@ -79,7 +129,7 @@ export default function OutreachPage() {
         </div>
       ) : (
         <>
-          {/* Queue Tab */}
+          {/* QUEUE TAB */}
           {activeTab === 'queue' && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="grid gap-6 md:grid-cols-3 flex-1">
               <Card className="md:col-span-2 flex flex-col">
@@ -87,7 +137,7 @@ export default function OutreachPage() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <CardTitle className="text-gray-100">Next Dispatch Batch</CardTitle>
-                      <CardDescription>High-fit leads queued for the next 30-min control cycle.</CardDescription>
+                      <CardDescription>High-fit leads queued for the next worker cycle.</CardDescription>
                     </div>
                     <Button variant="outline" className="gap-2 w-full sm:w-auto justify-center" onClick={() => dashboardAPI.forceRunSourcing()}>
                       <PlayCircle className="h-4 w-4" /> Dispatch Now
@@ -104,21 +154,15 @@ export default function OutreachPage() {
                   ) : (
                     <div className="divide-y divide-gray-800">
                       {queue.map((lead: any, i) => (
-                        <motion.div
-                          key={lead._id || lead.lead_id}
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          transition={{ delay: i * 0.04 }}
+                        <motion.div key={lead._id || lead.lead_id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.04 }}
                           className="p-4 hover:bg-gray-800/40 transition-colors group cursor-pointer"
                         >
                           <div className="flex justify-between items-start mb-2">
                             <div>
                               <h4 className="text-gray-100 font-medium group-hover:text-indigo-400 transition-colors">
-                                {lead.company_id || lead.company || 'Unknown Company'}
+                                {lead.company || lead.company_id || 'Unknown Company'}
                               </h4>
-                              <p className="text-sm text-gray-400">
-                                {lead.email || 'No email'} · Lead ID: {lead.lead_id || lead._id?.toString().slice(-6)}
-                              </p>
+                              <p className="text-sm text-gray-400">{lead.email || 'No email'} · {lead.lead_id}</p>
                             </div>
                             <span className="bg-emerald-950/50 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded text-xs font-semibold">
                               Score: {lead.fit_score || lead.score || '—'}
@@ -126,12 +170,10 @@ export default function OutreachPage() {
                           </div>
                           <div className="flex justify-between items-center text-xs mt-2">
                             <span className="flex items-center gap-1 text-indigo-400 bg-indigo-950/50 px-2 py-1 rounded">
-                              <UserCheck className="h-3 w-3" />
-                              {lead.qualification_status || 'qualified'}
+                              <UserCheck className="h-3 w-3" /> {lead.qualification_status || 'Qualified'}
                             </span>
                             <span className="flex items-center gap-1 text-gray-500">
-                              <Clock className="h-3 w-3" />
-                              Queued {timeAgo(lead.createdAt)}
+                              <Clock className="h-3 w-3" /> Queued {timeAgo(lead.createdAt)}
                             </span>
                           </div>
                         </motion.div>
@@ -141,25 +183,38 @@ export default function OutreachPage() {
                 </CardContent>
               </Card>
 
+              {/* Gap 3: Shift Budget Card */}
               <Card>
                 <CardHeader className="border-b border-gray-800 bg-gray-900/50">
                   <CardTitle className="text-gray-100">Queue Safety & Limits</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-6 pt-6">
+                <CardContent className="space-y-5 pt-6">
+                  {/* Daily */}
                   <div>
                     <div className="flex justify-between text-sm mb-2">
                       <span className="text-gray-400">Daily Volume ({sentToday} / {dailyCap})</span>
                       <span className="text-gray-100 font-mono">{capPercent}%</span>
                     </div>
                     <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${capPercent}%` }}
-                        transition={{ duration: 1 }}
+                      <motion.div initial={{ width: 0 }} animate={{ width: `${capPercent}%` }} transition={{ duration: 1 }}
                         className={`h-full ${capPercent > 80 ? 'bg-red-500' : capPercent > 50 ? 'bg-amber-500' : 'bg-indigo-500'}`}
                       />
                     </div>
-                    <p className="text-xs text-gray-600 mt-2">W01 pauses when cap is reached to protect domain reputation.</p>
+                    <p className="text-xs text-gray-600 mt-1">W01 pauses at cap to protect domain reputation.</p>
+                  </div>
+
+                  {/* Shift */}
+                  <div>
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-gray-400">This Shift ({shiftSent} / {shiftLimit})</span>
+                      <span className="text-gray-100 font-mono">{shiftPercent}%</span>
+                    </div>
+                    <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+                      <motion.div initial={{ width: 0 }} animate={{ width: `${shiftPercent}%` }} transition={{ duration: 1 }}
+                        className={`h-full ${shiftPercent > 80 ? 'bg-red-500' : shiftPercent > 50 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                      />
+                    </div>
+                    <p className="text-xs text-gray-600 mt-1">{currentShift} · Resets in <span className="text-amber-400 font-mono">{formatMs(countdown)}</span></p>
                   </div>
 
                   <div className={`p-4 rounded-lg border ${queue.length === 0 ? 'bg-emerald-950/20 border-emerald-900/50' : 'bg-amber-950/20 border-amber-900/50'}`}>
@@ -168,9 +223,7 @@ export default function OutreachPage() {
                       <span className="text-sm font-semibold">Queue Health</span>
                     </div>
                     <p className="text-xs text-gray-300">
-                      {queue.length === 0
-                        ? 'Queue is empty. Engine will source new leads on next cycle.'
-                        : `${queue.length} leads pending dispatch. Engine running normally.`}
+                      {queue.length === 0 ? 'Queue empty. Engine sourcing new leads.' : `${queue.length} leads pending dispatch. Engine running normally.`}
                     </p>
                   </div>
                 </CardContent>
@@ -178,7 +231,7 @@ export default function OutreachPage() {
             </motion.div>
           )}
 
-          {/* Inbox Tab */}
+          {/* INBOX TAB */}
           {activeTab === 'inbox' && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex-1 bg-[#0a0a0a] border border-gray-800 rounded-xl flex flex-col md:flex-row overflow-hidden min-h-[500px]">
               <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r border-gray-800 flex flex-col max-h-[300px] md:max-h-none">
@@ -193,29 +246,18 @@ export default function OutreachPage() {
                       <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-20" />
                       <p className="text-sm">No inbound replies yet.</p>
                     </div>
-                  ) : (
-                    inbox.map((msg: any) => (
-                      <div
-                        key={msg._id}
-                        onClick={() => setSelectedMsg(msg)}
-                        className={`p-4 hover:bg-gray-800/40 cursor-pointer transition-colors ${selectedMsg?._id === msg._id ? 'bg-indigo-950/30 border-l-2 border-indigo-500' : ''}`}
-                      >
-                        <div className="flex justify-between items-start mb-1">
-                          <span className="text-sm font-medium text-gray-100 truncate pr-2">
-                            {msg.contact_id || 'Unknown'}
-                          </span>
-                          <span className="text-xs text-gray-500 whitespace-nowrap">{timeAgo(msg.createdAt)}</span>
-                        </div>
-                        <p className="text-xs font-medium text-gray-300 truncate mb-1">{msg.subject || '(No subject)'}</p>
-                        <p className="text-xs text-gray-500 line-clamp-2">{msg.body}</p>
-                        <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded mt-1 inline-block ${
-                          msg.purpose === 'inbound_reply' ? 'bg-emerald-950/50 text-emerald-400' : 'bg-gray-800 text-gray-400'
-                        }`}>
-                          {msg.purpose || 'reply'}
-                        </span>
+                  ) : inbox.map((msg: any) => (
+                    <div key={msg._id} onClick={() => setSelectedMsg(msg)}
+                      className={`p-4 hover:bg-gray-800/40 cursor-pointer transition-colors ${selectedMsg?._id === msg._id ? 'bg-indigo-950/30 border-l-2 border-indigo-500' : ''}`}
+                    >
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-sm font-medium text-gray-100 truncate pr-2">{msg.contact_id || 'Unknown'}</span>
+                        <span className="text-xs text-gray-500 whitespace-nowrap">{timeAgo(msg.createdAt)}</span>
                       </div>
-                    ))
-                  )}
+                      <p className="text-xs font-medium text-gray-300 truncate mb-1">{msg.subject || '(No subject)'}</p>
+                      <p className="text-xs text-gray-500 line-clamp-2">{msg.body}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
               <div className="flex-1 flex flex-col">
@@ -223,9 +265,7 @@ export default function OutreachPage() {
                   <div className="flex flex-col h-full">
                     <div className="p-5 border-b border-gray-800 bg-gray-900/50">
                       <h3 className="font-semibold text-gray-100">{selectedMsg.subject || '(No Subject)'}</h3>
-                      <p className="text-xs text-gray-500 mt-1">
-                        From: {selectedMsg.contact_id} · {timeAgo(selectedMsg.createdAt)}
-                      </p>
+                      <p className="text-xs text-gray-500 mt-1">From: {selectedMsg.contact_id} · {timeAgo(selectedMsg.createdAt)}</p>
                     </div>
                     <div className="flex-1 p-6 overflow-y-auto">
                       <p className="text-sm text-gray-300 whitespace-pre-wrap">{selectedMsg.body}</p>
@@ -235,7 +275,83 @@ export default function OutreachPage() {
                   <div className="flex-1 flex flex-col items-center justify-center text-gray-600 p-8 text-center">
                     <MessageSquare className="h-12 w-12 mb-4 opacity-20" />
                     <h3 className="text-lg font-medium text-gray-400 mb-2">Select a conversation</h3>
-                    <p className="text-sm max-w-md">The W11 Inbox shows inbound replies. Click a message to read it.</p>
+                    <p className="text-sm max-w-md">Click a message to read it.</p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+
+          {/* GAP 4: AI DRAFTS TAB */}
+          {activeTab === 'drafts' && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex-1 flex flex-col md:flex-row gap-6">
+              <div className="w-full md:w-2/5 bg-[#0a0a0a] border border-gray-800 rounded-xl overflow-hidden flex flex-col">
+                <div className="p-4 border-b border-gray-800 bg-gray-900/50 flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-100 flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-amber-400" /> AI-Generated Draft Replies
+                  </h3>
+                  <span className="text-xs text-gray-500">{drafts.length} pending approval</span>
+                </div>
+                <div className="flex-1 overflow-y-auto divide-y divide-gray-800">
+                  {drafts.length === 0 ? (
+                    <div className="p-8 text-center text-gray-600">
+                      <CheckCircle className="h-8 w-8 mx-auto mb-2 opacity-20 text-emerald-500" />
+                      <p className="text-sm">No drafts pending. AI inbox is clear.</p>
+                    </div>
+                  ) : drafts.map((draft: any) => (
+                    <div key={draft._id} onClick={() => { setSelectedDraft(draft); setEditingBody(draft.body || ''); setEditing(false); }}
+                      className={`p-4 hover:bg-gray-800/40 cursor-pointer transition-colors ${selectedDraft?._id === draft._id ? 'bg-amber-950/20 border-l-2 border-amber-500' : ''}`}
+                    >
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-sm font-medium text-gray-100 truncate">{draft.contact_id || 'Unknown'}</span>
+                        <span className="text-xs text-gray-500">{timeAgo(draft.createdAt)}</span>
+                      </div>
+                      <p className="text-xs text-gray-400 truncate">{draft.subject}</p>
+                      <p className="text-xs text-gray-600 line-clamp-2 mt-1">{draft.body}</p>
+                      <span className="text-[10px] bg-amber-950/50 text-amber-400 border border-amber-900/50 px-1.5 py-0.5 rounded mt-2 inline-block">AI Draft</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex-1 bg-[#0a0a0a] border border-gray-800 rounded-xl flex flex-col overflow-hidden">
+                {selectedDraft ? (
+                  <>
+                    <div className="p-5 border-b border-gray-800 bg-gray-900/50 flex items-center justify-between">
+                      <div>
+                        <h3 className="font-semibold text-gray-100">{selectedDraft.subject}</h3>
+                        <p className="text-xs text-gray-500 mt-1">To: {selectedDraft.contact_id} · AI drafted {timeAgo(selectedDraft.createdAt)}</p>
+                      </div>
+                      <button onClick={() => setEditing(e => !e)} className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 px-3 py-1.5 border border-gray-700 rounded-md transition-colors">
+                        <Edit3 className="h-3.5 w-3.5" /> {editing ? 'Cancel Edit' : 'Edit'}
+                      </button>
+                    </div>
+                    <div className="flex-1 p-6 overflow-y-auto">
+                      {editing ? (
+                        <textarea
+                          value={editingBody}
+                          onChange={e => setEditingBody(e.target.value)}
+                          className="w-full h-full min-h-[250px] bg-gray-900 border border-gray-700 rounded-lg p-4 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 resize-none"
+                        />
+                      ) : (
+                        <p className="text-sm text-gray-300 whitespace-pre-wrap">{selectedDraft.body}</p>
+                      )}
+                    </div>
+                    <div className="p-4 border-t border-gray-800 bg-gray-900/50 flex gap-3 justify-end">
+                      <Button variant="ghost" size="sm" className="text-red-400 hover:text-red-300" onClick={() => { setSelectedDraft(null); setEditing(false); }}>
+                        <X className="h-4 w-4 mr-1" /> Discard
+                      </Button>
+                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2" onClick={() => handleSendDraft(selectedDraft, editing ? editingBody : undefined)} disabled={sending}>
+                        {sending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                        {editing ? 'Send Edited Reply' : 'Send AI Reply'}
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-gray-600 p-8 text-center">
+                    <Zap className="h-12 w-12 mb-4 opacity-20 text-amber-400" />
+                    <h3 className="text-lg font-medium text-gray-400 mb-2">Select a Draft</h3>
+                    <p className="text-sm max-w-sm">AI has drafted replies for positive leads. Review and send with one click, or edit before sending.</p>
                   </div>
                 )}
               </div>

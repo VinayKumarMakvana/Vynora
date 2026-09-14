@@ -78,15 +78,15 @@ export default function SettingsPage() {
                 <CardContent className="space-y-6 pt-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <label className="text-sm font-semibold text-gray-300">Daily Email Cap (W01)</label>
+                      <label className="text-sm font-semibold text-gray-300">Daily Email Limit (W01)</label>
                       <input 
                         type="number" 
-                        value={config['daily_email_cap'] || 25}
-                        onChange={(e) => setConfig({...config, daily_email_cap: e.target.value})}
+                        value={config['outbound_day_limit'] || 75}
+                        onChange={(e) => setConfig({...config, outbound_day_limit: e.target.value})}
                         className="w-full bg-gray-900 border border-gray-700 rounded-md py-2 px-3 text-gray-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-sm"
                       />
-                      <p className="text-xs text-gray-500">Maximum outbound emails allowed per day.</p>
-                      <Button variant="outline" size="sm" onClick={() => handleSave('daily_email_cap', config['daily_email_cap'])}>Save Config</Button>
+                      <p className="text-xs text-gray-500">Max emails per day. Split evenly across 3 shifts automatically.</p>
+                      <Button variant="outline" size="sm" onClick={() => handleSave('outbound_day_limit', config['outbound_day_limit'])}>Save</Button>
                     </div>
                     <div className="space-y-2">
                       <label className="text-sm font-semibold text-gray-300">Sourcing Grid Size (W10)</label>
@@ -100,16 +100,32 @@ export default function SettingsPage() {
                         <option value={500}>500 Businesses / Shift</option>
                       </select>
                       <p className="text-xs text-gray-500">Target batch size for scraping.</p>
-                      <Button variant="outline" size="sm" onClick={() => handleSave('sourcing_grid_size', config['sourcing_grid_size'])}>Save Config</Button>
+                      <Button variant="outline" size="sm" onClick={() => handleSave('sourcing_grid_size', config['sourcing_grid_size'])}>Save</Button>
                     </div>
+                  </div>
+
+                  {/* Gap 2: Target Markets/Cities */}
+                  <div className="pt-4 border-t border-gray-800 space-y-2">
+                    <label className="text-sm font-semibold text-gray-300">🌍 Target Markets (Cities)</label>
+                    <textarea
+                      rows={3}
+                      value={config['sourcing_areas'] || 'Manchester,London,Birmingham,Leeds,Glasgow,Dubai,Abu Dhabi,Sharjah,New York,Los Angeles,Chicago,Sydney,Melbourne,Brisbane'}
+                      onChange={(e) => setConfig({...config, sourcing_areas: e.target.value})}
+                      placeholder="Manchester,London,Dubai,New York..."
+                      className="w-full bg-gray-900 border border-gray-700 rounded-md py-2 px-3 text-gray-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-sm font-mono"
+                    />
+                    <p className="text-xs text-gray-500">Comma-separated city names. System rotates every 4 hours automatically.</p>
+                    <Button variant="outline" size="sm" onClick={() => handleSave('sourcing_areas', config['sourcing_areas'])}>Save Cities</Button>
                   </div>
                 </CardContent>
                 <CardFooter className="bg-gray-900/50 border-t border-gray-800 py-4 justify-end">
-                  <Button className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
-                    <Save className="h-4 w-4 mr-2" /> Save Changes
+                  <p className="text-xs text-gray-600 mr-auto">Changes apply from the next worker cycle (~5 min)</p>
+                  <Button className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm" onClick={() => { handleSave('outbound_day_limit', config['outbound_day_limit']); handleSave('sourcing_areas', config['sourcing_areas']); }}>
+                    <Save className="h-4 w-4 mr-2" /> Save All
                   </Button>
                 </CardFooter>
               </Card>
+
 
               <div className="p-5 border border-red-900/50 bg-red-950/20 rounded-xl flex items-start gap-4">
                 <ShieldAlert className="h-6 w-6 text-red-500 shrink-0 mt-0.5" />

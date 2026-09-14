@@ -61,13 +61,15 @@ export class LeadSourcingService {
     const execution_id = sourceId || `exec-src-${Date.now()}`;
     const cfg = await this.getConfig();
     
-    const areaList = String(cfg.sourcing_areas || cfg.sourcing_area || 'Manchester').split(',').map(s => s.trim()).filter(Boolean);
+    const areaList = String(cfg.sourcing_areas || cfg.sourcing_area || 'Manchester,London,Birmingham,Leeds,Glasgow,Dubai,Abu Dhabi,Sharjah,New York,Los Angeles,Chicago,Sydney,Melbourne,Brisbane').split(',').map(s => s.trim()).filter(Boolean);
     const areas = areaList.length ? areaList : ['Manchester'];
     const rotIdx = Math.floor(Date.now() / (4 * 3600 * 1000)) % areas.length;
     const area = areas[rotIdx];
+    console.log(`[Sourcing] Target city this rotation: ${area} (${rotIdx + 1}/${areas.length})`);
 
-    // RESEARCH TARGET = 300 RAW BUSINESSES (Prevents 504 Timeouts on Overpass Public Servers)
-    const cap = 300; 
+
+    // RESEARCH TARGET = 200 RAW BUSINESSES
+    const cap = 200;
 
     const defaultGroups = 'amenity=dentist;amenity=clinic;amenity=doctors|office=it;office=telecommunication;office=company|office=lawyer;office=estate_agent;office=accountant;office=financial|industrial=factory;industrial=manufacturing;craft=builder|healthcare=hospital;tourism=hotel;leisure=resort|office=advertising_agency;office=consulting;office=architect|shop=jewelry;shop=beauty;shop=clothes;amenity=restaurant';
     const filterGroups = String(cfg.sourcing_osm_filters || defaultGroups).split('|').map(s => s.trim()).filter(Boolean);
@@ -89,8 +91,12 @@ export class LeadSourcingService {
       clauses.push(`  nwr${tag}["email"](area.searchArea);`);
     }
 
+    // Shared data structures for both Overpass and fallback
+    const seenDomain: any = {};
+    const businesses: any[] = [];
+
     // Optimized timeout to prevent 504 hanging
-    const ql = `[out:json][timeout:40];\narea["name"="${area}"]->.searchArea;\n(\n${clauses.join('\n')}\n);\nout tags center ${cap * 3};`;
+    const ql = `[out:json][timeout:140];\narea["name"="${area}"]->.searchArea;\n(\n${clauses.join('\n')}\n);\nout tags center ${cap * 3};`;
 
     let elements = [];
     const endpoints = [
@@ -110,7 +116,7 @@ export class LeadSourcingService {
             'Content-Type': 'application/x-www-form-urlencoded',
             'User-Agent': 'VynoraAIAgency/1.0 (vinaytailor8432@gmail.com)'
           }, 
-          timeout: 45000,
+          timeout: 150000,
           httpsAgent: ipv4Agent  // Force IPv4 — fixes ENETUNREACH on Render
         });
         if (res.data && Array.isArray(res.data.elements)) {
@@ -125,56 +131,102 @@ export class LeadSourcingService {
     }
 
     if (!success) {
-      await this.logEvent(execution_id, 'none', `Overpass API failed on all endpoints. Last error: ${lastError}`, 'Failed', 'High');
-      return { status: 'error', message: 'Overpass API request failed' };
-    }
-
-    if (elements.length === 0) {
-      await this.logEvent(execution_id, 'none', 'No workable businesses discovered (empty/failed source or all filtered)', 'Empty', 'Low');
-      return { status: 'success', message: 'No businesses found' };
-    }
-
-    const seenDomain: any = {};
-    const businesses = [];
-
-    for (const el of elements) {
-      const t = el.tags || {};
-      const name = String(t.name || '').trim();
-      const website = String(t.website || t['contact:website'] || '').trim();
-      const osmEmail = String(t['contact:email'] || t.email || '').trim().toLowerCase();
-      let domain = this.domainFromUrl(website);
+      console.warn(`[Sourcing] All Overpass mirrors failed. Switching to UK Business Directory fallback...`);
       
-      if (!domain && osmEmail.indexOf('@') !== -1) {
-        const cand = osmEmail.split('@')[1];
-        if (/^[a-z0-9.-]+\.[a-z]{2,}$/.test(cand)) domain = cand;
+      // ── FALLBACK: UK Business Directory Scraping ────────────────────────
+      // Yell.com and FreeIndex are reliable UK directory sources
+      const keywords = rawFilters.map(f => f.split('=').pop() || 'company').join(',');
+      const yellUrl = `https://www.yell.com/ucs/UcsSearchAction.do?keywords=${encodeURIComponent(keywords)}&location=${encodeURIComponent(area)}&pageNum=1`;
+      const freeidxUrl = `https://www.freeindex.co.uk/search.htm?q=${encodeURIComponent(keywords)}&l=${encodeURIComponent(area)}`;
+      
+      let fallbackHtml = '';
+      for (const dirUrl of [yellUrl, freeidxUrl]) {
+        try {
+          const r = await axios.get(dirUrl, { 
+            timeout: 30000, 
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; VynoraBot/1.0)' },
+            httpsAgent: ipv4Agent 
+          });
+          if (typeof r.data === 'string' && r.data.length > 500) {
+            fallbackHtml += r.data;
+            break;
+          }
+        } catch (e: any) {
+          console.warn(`[Sourcing] Directory fallback failed on ${dirUrl}: ${e.message}`);
+        }
       }
-      if (!name || !domain) continue;
-      if (seenDomain[domain]) continue;
-      seenDomain[domain] = true;
 
-      const city = String(t['addr:city'] || t['addr:town'] || '').trim();
-      let category = '';
-      if (t.amenity) category = String(t.amenity);
-      else if (t.office) category = 'office:' + String(t.office);
-      else if (t.shop) category = 'shop:' + String(t.shop);
+      // Parse business websites from directory HTML
+      if (fallbackHtml.length > 0) {
+        const websiteMatches = fallbackHtml.match(/https?:\/\/(?!www\.yell|www\.freeindex)[a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s"'<>]*)?/gi) || [];
+        const uniqueUrls = [...new Set(websiteMatches)].slice(0, cap);
+        for (const url of uniqueUrls) {
+          const domain = this.domainFromUrl(url);
+          if (!domain || seenDomain[domain]) continue;
+          seenDomain[domain] = true;
+          const slug = domain.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '');
+          businesses.push({
+            raw_name: domain, norm_name: domain, company: domain, domain,
+            website: `https://${domain}`, city: area, category: keywords,
+            phone: '', osm_email: '', website_present: true,
+            company_id: 'CO-DIR-' + slug, lead_dedupe_key: 'dir:' + domain,
+            source: 'UK-Directory/Yell', source_ref: 'directory'
+          });
+        }
+        console.log(`[Sourcing] Directory fallback extracted ${businesses.length} potential leads.`);
+      }
 
-      const phone = String(t.phone || t['contact:phone'] || '').trim();
-      const norm = this.normName(name);
-      const slug = domain.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '');
+      if (businesses.length === 0) {
+        await this.logEvent(execution_id, 'none', `All sourcing endpoints failed. Last Overpass error: ${lastError}`, 'Failed', 'High');
+        return { status: 'error', message: 'All sourcing endpoints failed' };
+      }
+      // Skip to processing if fallback found leads
+    } else {
+      // ── OVERPASS SUCCESS: Parse elements into businesses array ─────────────
+      if (elements.length === 0) {
+        await this.logEvent(execution_id, 'none', 'No workable businesses discovered (empty/failed source or all filtered)', 'Empty', 'Low');
+        return { status: 'success', message: 'No businesses found' };
+      }
 
-      businesses.push({
-        raw_name: name, norm_name: norm, company: name, domain, website: website.replace(/\/$/, ''),
-        city, category, phone, osm_email: /^(example|test|noreply|no-reply)@/.test(osmEmail) ? '' : osmEmail,
-        website_present: !!website, company_id: 'CO-OSM-' + slug, lead_dedupe_key: 'osm:' + domain,
-        source: 'OpenStreetMap/Overpass', source_ref: `${el.type || 'node'}/${el.id || ''}`
-      });
-      if (businesses.length >= cap) break;
-    }
+      for (const el of elements) {
+        const t = el.tags || {};
+        const name = String(t.name || '').trim();
+        const website = String(t.website || t['contact:website'] || '').trim();
+        const osmEmail = String(t['contact:email'] || t.email || '').trim().toLowerCase();
+        let domain = this.domainFromUrl(website);
+        
+        if (!domain && osmEmail.indexOf('@') !== -1) {
+          const cand = osmEmail.split('@')[1];
+          if (/^[a-z0-9.-]+\.[a-z]{2,}$/.test(cand)) domain = cand;
+        }
+        if (!name || !domain) continue;
+        if (seenDomain[domain]) continue;
+        seenDomain[domain] = true;
 
-    if (businesses.length === 0) {
-      await this.logEvent(execution_id, 'none', 'No workable businesses discovered (empty/failed source or all filtered)', 'Empty', 'Low');
-      return { status: 'success', message: 'No viable businesses extracted' };
-    }
+        const city = String(t['addr:city'] || t['addr:town'] || '').trim();
+        let category = '';
+        if (t.amenity) category = String(t.amenity);
+        else if (t.office) category = 'office:' + String(t.office);
+        else if (t.shop) category = 'shop:' + String(t.shop);
+
+        const phone = String(t.phone || t['contact:phone'] || '').trim();
+        const norm = this.normName(name);
+        const slug = domain.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '');
+
+        businesses.push({
+          raw_name: name, norm_name: norm, company: name, domain, website: website.replace(/\/$/, ''),
+          city, category, phone, osm_email: /^(example|test|noreply|no-reply)@/.test(osmEmail) ? '' : osmEmail,
+          website_present: !!website, company_id: 'CO-OSM-' + slug, lead_dedupe_key: 'osm:' + domain,
+          source: 'OpenStreetMap/Overpass', source_ref: `${el.type || 'node'}/${el.id || ''}`
+        });
+        if (businesses.length >= cap) break;
+      }
+
+      if (businesses.length === 0) {
+        await this.logEvent(execution_id, 'none', 'No workable businesses discovered (empty/failed source or all filtered)', 'Empty', 'Low');
+        return { status: 'success', message: 'No viable businesses extracted' };
+      }
+    } // end else (Overpass success)
 
     let processedCount = 0;
     

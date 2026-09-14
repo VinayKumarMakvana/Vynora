@@ -1,13 +1,10 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/vynora', // Dynamic backend URL for production
-  headers: {
-    'Content-Type': 'application/json'
-  }
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/vynora',
+  headers: { 'Content-Type': 'application/json' }
 });
 
-// Centralized endpoints
 export const dashboardAPI = {
   getStats: () => api.get('/dashboard/stats').then(res => res.data),
   getFeed: () => api.get('/dashboard/feed').then(res => res.data),
@@ -19,6 +16,9 @@ export const dashboardAPI = {
   getOutreachQueue: () => api.get('/dashboard/outreach/queue').then(res => res.data),
   purgeOutreachQueue: () => api.delete('/dashboard/outreach/queue').then(res => res.data),
   getInboxMessages: () => api.get('/dashboard/outreach/inbox').then(res => res.data),
+  getDraftReplies: () => api.get('/dashboard/outreach/drafts').then(res => res.data),
+  sendDraftReply: (data: { message_id: string, body?: string, subject?: string }) => api.post('/dashboard/outreach/drafts/send', data).then(res => res.data),
+  getShiftStats: () => api.get('/dashboard/shift/stats').then(res => res.data),
   getFinance: () => api.get('/dashboard/finance').then(res => res.data),
   forceRunSourcing: () => api.post('/sourcing-run').then(res => res.data),
   getHealth: () => api.get('/health').then(res => res.data),
