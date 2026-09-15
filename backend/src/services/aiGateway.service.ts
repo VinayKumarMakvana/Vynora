@@ -10,6 +10,10 @@ export interface AiGatewayPayload {
   max_tokens?: number;
 }
 
+// ── Rate Limiting State ──────────────────────────────────────────────────────
+let lastAiRequestTime = 0;
+const MIN_DELAY_MS = 4500; // Strictly 1 request per 4.5s (~13 RPM) to respect Gemini free tier limit
+
 // ── Key Rotation State ─────────────────────────────────────────────────────
 // In-memory rotation index: persists for the lifetime of the process.
 // When a key gets 429, we move to the next. When we wrap around, alert is sent.
@@ -129,6 +133,17 @@ export const aiGatewayService = {
    * Returns success:false only if ALL keys are exhausted.
    */
   async processAiRequest(payload: AiGatewayPayload): Promise<any> {
+    // 0. Enforce Global Rate Limit (Mutex Queue)
+    const now = Date.now();
+    const timeSinceLast = now - lastAiRequestTime;
+    if (timeSinceLast < MIN_DELAY_MS) {
+      const waitTime = MIN_DELAY_MS - timeSinceLast;
+      lastAiRequestTime = now + waitTime;
+      await new Promise(r => setTimeout(r, waitTime));
+    } else {
+      lastAiRequestTime = Date.now();
+    }
+
     // 1. Get AI Config
     const configs = await Config.find({ category: 'ai', is_active: true });
     const cfg: Record<string, string> = {};
@@ -206,6 +221,15 @@ export const aiGatewayService = {
           if (triedCount >= keys.length) {
             // All keys tried — send alert, reset, return error
             await handleAllKeysExhausted(keys.length);
+            
+            // If it gave a retry hint, sleep temporarily to let the engine recover on the next cycle
+            const retryMatch = msg.match(/retry in ([\d.]+)s/i);
+            if (retryMatch && retryMatch[1]) {
+              const waitSeconds = parseFloat(retryMatch[1]);
+              console.warn(`[AI-GATEWAY] Global rate limit hit. Pausing engine for ${waitSeconds} seconds...`);
+              await new Promise(r => setTimeout(r, waitSeconds * 1000));
+            }
+
             return {
               success: false,
               ai_available: false,
