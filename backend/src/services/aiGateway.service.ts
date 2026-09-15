@@ -12,7 +12,8 @@ export interface AiGatewayPayload {
 
 // ── Rate Limiting State ──────────────────────────────────────────────────────
 let lastAiRequestTime = 0;
-const MIN_DELAY_MS = 4500; // Strictly 1 request per 4.5s (~13 RPM) to respect Gemini free tier limit
+const MIN_DELAY_MS = 15000; // 15 seconds per request (4 RPM) for maximum stability
+
 
 // ── Key Rotation State ─────────────────────────────────────────────────────
 // In-memory rotation index: persists for the lifetime of the process.
